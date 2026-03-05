@@ -1,6 +1,6 @@
 // ─── MultiplayerRoomModal ─────────────────────────────────────────────────────
-// Real multiplayer room modal using localStorage + BroadcastChannel + URL params.
-// QR code and shareable link allow players on separate devices to join.
+// Real multiplayer room modal using ICP canister backend.
+// QR code and shareable link allow players on ANY device to join.
 
 import { Button } from "@/components/ui/button";
 import {
@@ -22,8 +22,7 @@ import {
   WifiOff,
   X,
 } from "lucide-react";
-import QRCode from "qrcode";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { RoomState } from "../../hooks/useMultiplayerRoom";
 import { useMultiplayerRoom } from "../../hooks/useMultiplayerRoom";
 
@@ -47,22 +46,22 @@ function getPlayerColor(index: number): string {
 }
 
 // ── QR Code image component ──────────────────────────────────────────────────
+// Uses the qr-server.com API — no external npm package required.
 function QRCodeImage({ url }: { url: string }) {
-  const [dataUrl, setDataUrl] = useState<string>("");
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
 
-  useEffect(() => {
-    if (!url) return;
-    setError(false);
-    QRCode.toDataURL(url, {
-      width: 180,
-      margin: 2,
-      color: { dark: "#000000", light: "#ffffff" },
-      errorCorrectionLevel: "M",
-    })
-      .then(setDataUrl)
-      .catch(() => setError(true));
-  }, [url]);
+  const qrSrc = url
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(url)}&bgcolor=ffffff&color=000000&margin=4`
+    : "";
+
+  if (!url) {
+    return (
+      <div className="w-[180px] h-[180px] flex items-center justify-center rounded-lg bg-white/10 border border-border">
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   if (error) {
     return (
@@ -70,15 +69,7 @@ function QRCodeImage({ url }: { url: string }) {
         className="w-[180px] h-[180px] flex items-center justify-center rounded-lg bg-white text-center p-3"
         style={{ color: "#000" }}
       >
-        <p className="text-[11px] font-mono break-all">{url}</p>
-      </div>
-    );
-  }
-
-  if (!dataUrl) {
-    return (
-      <div className="w-[180px] h-[180px] flex items-center justify-center rounded-lg bg-white/10 border border-border">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        <p className="text-[11px] font-mono break-all leading-tight">{url}</p>
       </div>
     );
   }
@@ -88,18 +79,33 @@ function QRCodeImage({ url }: { url: string }) {
       className="relative p-2 rounded-lg"
       style={{ background: "#fff", display: "inline-block" }}
     >
-      <img src={dataUrl} alt="QR Code para unirse" width={180} height={180} />
-      {/* Scan line animation */}
-      <div
-        className="absolute left-2 right-2 pointer-events-none"
-        style={{
-          height: 2,
-          background:
-            "linear-gradient(90deg, transparent, oklch(0.75 0.25 145), transparent)",
-          animation: "qr-scan 2.5s ease-in-out infinite",
-          boxShadow: "0 0 8px oklch(0.75 0.25 145)",
-        }}
+      {!loaded && (
+        <div className="w-[180px] h-[180px] flex items-center justify-center">
+          <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+        </div>
+      )}
+      <img
+        src={qrSrc}
+        alt="QR Code para unirse"
+        width={180}
+        height={180}
+        style={{ display: loaded ? "block" : "none" }}
+        onLoad={() => setLoaded(true)}
+        onError={() => setError(true)}
       />
+      {/* Scan line animation */}
+      {loaded && (
+        <div
+          className="absolute left-2 right-2 pointer-events-none"
+          style={{
+            height: 2,
+            background:
+              "linear-gradient(90deg, transparent, oklch(0.75 0.25 145), transparent)",
+            animation: "qr-scan 2.5s ease-in-out infinite",
+            boxShadow: "0 0 8px oklch(0.75 0.25 145)",
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -215,42 +221,18 @@ export default function MultiplayerRoomModal({
   const [joinError, setJoinError] = useState("");
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
   const [liveRoom, setLiveRoom] = useState<RoomState | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Sync external room changes into liveRoom
+  // Sync external room changes into liveRoom and detect game start
   useEffect(() => {
-    if (room) setLiveRoom(room);
-  }, [room]);
-
-  // Poll for room updates (cross-device sync via localStorage)
-  useEffect(() => {
-    if (!liveRoom || (view !== "lobby" && view !== "waiting")) {
-      if (pollRef.current) clearInterval(pollRef.current);
-      return;
-    }
-
-    pollRef.current = setInterval(() => {
-      try {
-        const raw = localStorage.getItem(`cgc_room_${liveRoom.code}`);
-        if (raw) {
-          const updated = JSON.parse(raw) as RoomState;
-          setLiveRoom(updated);
-          // If game is starting, trigger callback
-          if (updated.status === "starting" && onStartMultiplayerGame) {
-            onStartMultiplayerGame(updated.players.length, updated.level);
-            onOpenChange(false);
-          }
-        }
-      } catch {
-        // ignore parse errors
+    if (room) {
+      setLiveRoom(room);
+      if (room.status === "starting" && onStartMultiplayerGame) {
+        onStartMultiplayerGame(room.players.length, room.level);
+        onOpenChange(false);
       }
-    }, 500);
-
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [liveRoom, view, onStartMultiplayerGame, onOpenChange]);
+    }
+  }, [room, onStartMultiplayerGame, onOpenChange]);
 
   // Reset state when modal closes
   useEffect(() => {
@@ -286,40 +268,62 @@ export default function MultiplayerRoomModal({
     setTimeout(() => setCopied(null), 1500);
   }, [joinUrl]);
 
-  const handleCreateRoom = useCallback(() => {
-    const newRoom = createRoom(maxPlayers, selectedLevel);
-    setLiveRoom(newRoom);
-    setView("lobby");
+  const handleCreateRoom = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const newRoom = await createRoom(maxPlayers, selectedLevel);
+      if (newRoom) {
+        setLiveRoom(newRoom);
+        setView("lobby");
+      }
+    } finally {
+      setIsLoading(false);
+    }
   }, [createRoom, maxPlayers, selectedLevel]);
 
-  const handleJoinRoom = useCallback(() => {
+  const handleJoinRoom = useCallback(async () => {
     const code = joinCode.trim().toUpperCase();
     if (!code || code.length !== 6) {
       setJoinError("Código debe tener 6 caracteres");
       return;
     }
     const playerName = joinName.trim() || "Jugador";
-    const result = joinRoom(code, playerName);
-    if (!result) {
-      setJoinError("Sala no encontrada o llena. Verifica el código.");
-      return;
+    setIsLoading(true);
+    try {
+      const result = await joinRoom(code, playerName);
+      if (!result) {
+        setJoinError("Sala no encontrada o llena. Verifica el código.");
+        return;
+      }
+      setJoinError("");
+      setLiveRoom(result);
+      setView("waiting");
+    } finally {
+      setIsLoading(false);
     }
-    setJoinError("");
-    setLiveRoom(result);
-    setView("waiting");
   }, [joinCode, joinName, joinRoom]);
 
-  const handleStartGame = useCallback(() => {
+  const handleStartGame = useCallback(async () => {
     if (!liveRoom || !isHost) return;
-    startGame();
-    if (onStartMultiplayerGame) {
-      onStartMultiplayerGame(liveRoom.players.length, liveRoom.level);
+    setIsLoading(true);
+    try {
+      await startGame();
+      if (onStartMultiplayerGame) {
+        onStartMultiplayerGame(liveRoom.players.length, liveRoom.level);
+      }
+      onOpenChange(false);
+    } finally {
+      setIsLoading(false);
     }
-    onOpenChange(false);
   }, [liveRoom, isHost, startGame, onStartMultiplayerGame, onOpenChange]);
 
-  const handleLeave = useCallback(() => {
-    leaveRoom();
+  const handleLeave = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      await leaveRoom();
+    } finally {
+      setIsLoading(false);
+    }
     setLiveRoom(null);
     setView("create");
   }, [leaveRoom]);
@@ -435,6 +439,7 @@ export default function MultiplayerRoomModal({
               <Button
                 size="lg"
                 onClick={handleCreateRoom}
+                disabled={isLoading}
                 className="w-full h-12 rounded-xl font-bold text-sm gap-2"
                 style={{
                   background: "oklch(0.75 0.25 145)",
@@ -442,8 +447,12 @@ export default function MultiplayerRoomModal({
                 }}
                 data-ocid="multiplayer.create_room_button"
               >
-                <PlayCircle className="w-5 h-5" />
-                Crear Sala
+                {isLoading ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <PlayCircle className="w-5 h-5" />
+                )}
+                {isLoading ? "Creando sala..." : "Crear Sala"}
               </Button>
 
               <div className="relative flex items-center gap-2">
@@ -598,6 +607,7 @@ export default function MultiplayerRoomModal({
                     <Button
                       size="lg"
                       onClick={handleStartGame}
+                      disabled={isLoading}
                       className="w-full h-12 rounded-xl font-bold text-sm gap-2"
                       style={{
                         background: "oklch(0.75 0.25 145)",
@@ -605,8 +615,12 @@ export default function MultiplayerRoomModal({
                       }}
                       data-ocid="multiplayer.start_game_button"
                     >
-                      <PlayCircle className="w-5 h-5" />
-                      Iniciar Partida
+                      {isLoading ? (
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      ) : (
+                        <PlayCircle className="w-5 h-5" />
+                      )}
+                      {isLoading ? "Iniciando..." : "Iniciar Partida"}
                     </Button>
                   )}
                 </div>
@@ -619,8 +633,8 @@ export default function MultiplayerRoomModal({
 
               {/* Info note */}
               <p className="text-[9px] text-muted-foreground text-center leading-relaxed">
-                📱 Funciona mejor cuando todos los jugadores están en la misma
-                red
+                📱 Comparte el código o el QR — funciona desde cualquier
+                dispositivo
               </p>
             </div>
           </>
@@ -655,7 +669,7 @@ export default function MultiplayerRoomModal({
                   onChange={(e) => setJoinName(e.target.value)}
                   placeholder="Ej: Jugador2, María..."
                   maxLength={20}
-                  className="border-border bg-card/50 text-foreground placeholder:text-muted-foreground/50"
+                  className="border-slate-600 bg-slate-800 text-white placeholder:text-slate-400"
                   data-ocid="multiplayer.player_name_input"
                 />
               </div>
@@ -672,7 +686,7 @@ export default function MultiplayerRoomModal({
                   }}
                   placeholder="Ej: X7KP2M"
                   maxLength={6}
-                  className="font-mono text-center text-lg tracking-[0.3em] uppercase border-border bg-card/50 text-foreground placeholder:text-muted-foreground/50"
+                  className="font-mono text-center text-lg tracking-[0.3em] uppercase border-slate-600 bg-slate-800 text-white placeholder:text-slate-400"
                   data-ocid="multiplayer.room_code_input"
                 />
                 {joinError && (
@@ -688,7 +702,7 @@ export default function MultiplayerRoomModal({
               <Button
                 size="lg"
                 onClick={handleJoinRoom}
-                disabled={joinCode.length !== 6}
+                disabled={joinCode.length !== 6 || isLoading}
                 className="w-full h-12 rounded-xl font-bold text-sm gap-2"
                 style={{
                   background: "oklch(0.72 0.22 230)",
@@ -696,8 +710,12 @@ export default function MultiplayerRoomModal({
                 }}
                 data-ocid="multiplayer.join_room_button"
               >
-                <LogIn className="w-5 h-5" />
-                Unirse
+                {isLoading ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <LogIn className="w-5 h-5" />
+                )}
+                {isLoading ? "Uniéndose..." : "Unirse"}
               </Button>
 
               <p className="text-[9px] text-muted-foreground text-center leading-relaxed">
@@ -789,8 +807,8 @@ export default function MultiplayerRoomModal({
               </div>
 
               <p className="text-[9px] text-muted-foreground text-center leading-relaxed">
-                📱 Funciona mejor cuando todos los jugadores están en la misma
-                red
+                📱 Comparte el código o el QR — funciona desde cualquier
+                dispositivo
               </p>
             </div>
           </>

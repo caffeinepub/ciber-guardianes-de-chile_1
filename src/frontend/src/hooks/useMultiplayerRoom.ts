@@ -1,18 +1,19 @@
 // ─── useMultiplayerRoom ───────────────────────────────────────────────────────
-// Multiplayer room management via localStorage + BroadcastChannel + URL params.
-// Works across tabs in same browser (BroadcastChannel) and across devices on
-// same network by polling localStorage (500ms interval).
+// Multiplayer room management via ICP canister backend.
+// Uses real canister calls to sync state across any device/network.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { Room as CanisterRoom } from "../backend.d";
+import { useActor } from "./useActor";
 
 export type RoomPlayer = {
   id: string;
   name: string;
   isHost: boolean;
-  heroId?: string;
   joinedAt: number;
 };
 
+// Local RoomState type — mirrors canister Room but uses regular numbers
 export type RoomState = {
   code: string;
   players: RoomPlayer[];
@@ -23,9 +24,8 @@ export type RoomState = {
   createdAt: number;
 };
 
-const ROOM_PREFIX = "cgc_room_";
+const POLL_INTERVAL = 1500;
 const CHANNEL_NAME = "cgc-rooms";
-const POLL_INTERVAL = 500;
 
 function generateRoomCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -45,22 +45,22 @@ function getMyPlayerId(): string {
   return id;
 }
 
-function readRoomFromStorage(code: string): RoomState | null {
-  try {
-    const raw = localStorage.getItem(`${ROOM_PREFIX}${code}`);
-    if (!raw) return null;
-    return JSON.parse(raw) as RoomState;
-  } catch {
-    return null;
-  }
-}
-
-function writeRoomToStorage(room: RoomState): void {
-  localStorage.setItem(`${ROOM_PREFIX}${room.code}`, JSON.stringify(room));
-}
-
-function removeRoomFromStorage(code: string): void {
-  localStorage.removeItem(`${ROOM_PREFIX}${code}`);
+// Convert canister Room → local RoomState
+function toRoomState(r: CanisterRoom): RoomState {
+  return {
+    code: r.code,
+    players: r.players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      isHost: p.isHost,
+      joinedAt: Number(p.joinedAt),
+    })),
+    maxPlayers: Math.min(4, Math.max(2, Number(r.maxPlayers))) as 2 | 3 | 4,
+    level: Math.min(3, Math.max(1, Number(r.level))) as 1 | 2 | 3,
+    status: r.status as "waiting" | "ready" | "starting",
+    hostId: r.hostId,
+    createdAt: Number(r.createdAt),
+  };
 }
 
 function broadcastRoomUpdate(room: RoomState): void {
@@ -69,16 +69,23 @@ function broadcastRoomUpdate(room: RoomState): void {
     channel.postMessage({ type: "ROOM_UPDATE", room });
     channel.close();
   } catch {
-    // BroadcastChannel not supported — polling will handle sync
+    // BroadcastChannel not supported
   }
 }
 
 export function useMultiplayerRoom() {
+  const { actor } = useActor();
   const [room, setRoom] = useState<RoomState | null>(null);
   const [myPlayerId] = useState(getMyPlayerId);
   const [roomCodeFromUrl, setRoomCodeFromUrl] = useState<string | null>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const roomCodeRef = useRef<string | null>(null);
+
+  // Keep roomCodeRef in sync
+  useEffect(() => {
+    roomCodeRef.current = room?.code ?? null;
+  }, [room?.code]);
 
   // Check URL for ?room=CODE on mount
   useEffect(() => {
@@ -89,7 +96,7 @@ export function useMultiplayerRoom() {
     }
   }, []);
 
-  // Subscribe to BroadcastChannel for real-time updates
+  // Subscribe to BroadcastChannel for same-browser instant notification
   useEffect(() => {
     try {
       channelRef.current = new BroadcastChannel(CHANNEL_NAME);
@@ -98,7 +105,11 @@ export function useMultiplayerRoom() {
           type: string;
           room: RoomState;
         };
-        if (type === "ROOM_UPDATE" && room && updatedRoom.code === room.code) {
+        if (
+          type === "ROOM_UPDATE" &&
+          roomCodeRef.current &&
+          updatedRoom.code === roomCodeRef.current
+        ) {
           setRoom(updatedRoom);
         }
       };
@@ -109,12 +120,12 @@ export function useMultiplayerRoom() {
     return () => {
       channelRef.current?.close();
     };
-  }, [room]);
+  }, []);
 
-  // Poll localStorage for cross-device sync
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally using room?.code to avoid re-subscribing on every render
+  // Poll canister for cross-device real-time sync
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally using room?.code to avoid restarting poll on every state update
   useEffect(() => {
-    if (!room) {
+    if (!room || !actor) {
       if (pollRef.current) {
         clearInterval(pollRef.current);
         pollRef.current = null;
@@ -123,125 +134,107 @@ export function useMultiplayerRoom() {
     }
 
     const code = room.code;
-    pollRef.current = setInterval(() => {
-      const latest = readRoomFromStorage(code);
-      if (latest) {
-        setRoom((prev) => {
-          if (!prev) return latest;
-          // Only update if the data actually changed
-          if (JSON.stringify(prev) !== JSON.stringify(latest)) {
-            return latest;
-          }
-          return prev;
-        });
+    pollRef.current = setInterval(async () => {
+      try {
+        const canisterRoom = await actor.getRoomState(code);
+        if (canisterRoom) {
+          const latest = toRoomState(canisterRoom);
+          setRoom((prev) => {
+            if (!prev) return latest;
+            if (JSON.stringify(prev) !== JSON.stringify(latest)) {
+              return latest;
+            }
+            return prev;
+          });
+        }
+      } catch {
+        // ignore transient errors
       }
     }, POLL_INTERVAL);
 
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [room?.code]);
+  }, [room?.code, actor]);
 
   const createRoom = useCallback(
-    (maxPlayers: 2 | 3 | 4, level: 1 | 2 | 3): RoomState => {
+    async (
+      maxPlayers: 2 | 3 | 4,
+      level: 1 | 2 | 3,
+    ): Promise<RoomState | null> => {
+      if (!actor) return null;
       const code = generateRoomCode();
-      const hostPlayer: RoomPlayer = {
-        id: myPlayerId,
-        name: "Jugador 1 (Anfitrión)",
-        isHost: true,
-        joinedAt: Date.now(),
-      };
-      const newRoom: RoomState = {
-        code,
-        players: [hostPlayer],
-        maxPlayers,
-        level,
-        status: "waiting",
-        hostId: myPlayerId,
-        createdAt: Date.now(),
-      };
-      writeRoomToStorage(newRoom);
-      broadcastRoomUpdate(newRoom);
-      setRoom(newRoom);
-      return newRoom;
+      try {
+        const canisterRoom = await actor.createRoom(
+          code,
+          myPlayerId,
+          "Jugador 1 (Anfitrión)",
+          BigInt(maxPlayers),
+          BigInt(level),
+        );
+        const newRoom = toRoomState(canisterRoom);
+        broadcastRoomUpdate(newRoom);
+        setRoom(newRoom);
+        return newRoom;
+      } catch {
+        return null;
+      }
     },
-    [myPlayerId],
+    [actor, myPlayerId],
   );
 
   const joinRoom = useCallback(
-    (code: string, playerName?: string): RoomState | null => {
-      const existing = readRoomFromStorage(code.toUpperCase());
-      if (!existing) return null;
-      if (existing.players.length >= existing.maxPlayers) return null;
-
-      // Check if already joined
-      const alreadyJoined = existing.players.some((p) => p.id === myPlayerId);
-      if (alreadyJoined) {
-        setRoom(existing);
-        return existing;
+    async (code: string, playerName?: string): Promise<RoomState | null> => {
+      if (!actor) return null;
+      try {
+        const canisterRoom = await actor.joinRoom(
+          code.toUpperCase(),
+          myPlayerId,
+          playerName ?? "Jugador",
+        );
+        if (!canisterRoom) return null;
+        const joined = toRoomState(canisterRoom);
+        broadcastRoomUpdate(joined);
+        setRoom(joined);
+        return joined;
+      } catch {
+        return null;
       }
-
-      const newPlayer: RoomPlayer = {
-        id: myPlayerId,
-        name: playerName ?? `Jugador ${existing.players.length + 1}`,
-        isHost: false,
-        joinedAt: Date.now(),
-      };
-
-      const updatedRoom: RoomState = {
-        ...existing,
-        players: [...existing.players, newPlayer],
-        status:
-          existing.players.length + 1 >= 2
-            ? existing.players.length + 1 >= existing.maxPlayers
-              ? "ready"
-              : "waiting"
-            : "waiting",
-      };
-
-      writeRoomToStorage(updatedRoom);
-      broadcastRoomUpdate(updatedRoom);
-      setRoom(updatedRoom);
-      return updatedRoom;
     },
-    [myPlayerId],
+    [actor, myPlayerId],
   );
 
-  const leaveRoom = useCallback(() => {
-    if (!room) return;
-    const updated: RoomState = {
-      ...room,
-      players: room.players.filter((p) => p.id !== myPlayerId),
-    };
-
-    if (updated.players.length === 0) {
-      removeRoomFromStorage(room.code);
-    } else {
-      // Transfer host if leaving player was host
-      if (room.hostId === myPlayerId && updated.players.length > 0) {
-        updated.players[0] = { ...updated.players[0], isHost: true };
-        updated.hostId = updated.players[0].id;
-      }
-      writeRoomToStorage(updated);
-      broadcastRoomUpdate(updated);
+  const leaveRoom = useCallback(async () => {
+    if (!room || !actor) return;
+    try {
+      await actor.leaveRoom(room.code, myPlayerId);
+    } catch {
+      // best-effort
     }
-
     setRoom(null);
-  }, [room, myPlayerId]);
+  }, [room, actor, myPlayerId]);
 
-  const startGame = useCallback(() => {
-    if (!room) return;
-    const updated: RoomState = { ...room, status: "starting" };
-    writeRoomToStorage(updated);
-    broadcastRoomUpdate(updated);
-    setRoom(updated);
-  }, [room]);
+  const startGame = useCallback(async () => {
+    if (!room || !actor) return;
+    try {
+      await actor.startRoom(room.code, myPlayerId);
+      const updated: RoomState = { ...room, status: "starting" };
+      broadcastRoomUpdate(updated);
+      setRoom(updated);
+    } catch {
+      // best-effort
+    }
+  }, [room, actor, myPlayerId]);
 
-  const refreshRoom = useCallback(() => {
-    if (!room) return;
-    const latest = readRoomFromStorage(room.code);
-    if (latest) setRoom(latest);
-  }, [room]);
+  const refreshRoom = useCallback(async () => {
+    if (!room || !actor) return;
+    try {
+      const canisterRoom = await actor.getRoomState(room.code);
+      if (canisterRoom) setRoom(toRoomState(canisterRoom));
+    } catch {
+      // ignore
+    }
+  }, [room, actor]);
 
   const getJoinUrl = useCallback((code: string): string => {
     return `${window.location.origin}${window.location.pathname}?room=${code}`;

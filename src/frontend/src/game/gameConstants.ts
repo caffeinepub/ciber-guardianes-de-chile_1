@@ -57,4 +57,4 @@ export const PLAYER_NAMES = [
 ] as const;
 
 export const CARD_BACK_IMAGE =
-  "/assets/generated/defense-firewall.dim_400x560.png";
+  "/assets/generated/card-d03-firewall.dim_400x560.png";

@@ -17,11 +17,34 @@ export interface GameResult {
   'turnsPlayed' : bigint,
 }
 export interface Player { 'hero' : string, 'name' : string }
+export interface Room {
+  'status' : RoomStatus,
+  'code' : string,
+  'createdAt' : bigint,
+  'level' : bigint,
+  'players' : Array<RoomPlayer>,
+  'hostId' : string,
+  'maxPlayers' : bigint,
+}
+export interface RoomPlayer {
+  'id' : string,
+  'name' : string,
+  'joinedAt' : bigint,
+  'isHost' : boolean,
+}
+export type RoomStatus = { 'starting' : null } |
+  { 'waiting' : null } |
+  { 'ready' : null };
 export interface _SERVICE {
+  'createRoom' : ActorMethod<[string, string, string, bigint, bigint], Room>,
   'getMostPopularHero' : ActorMethod<[], [] | [[string, bigint]]>,
+  'getRoomState' : ActorMethod<[string], [] | [Room]>,
   'getTop10ByTurns' : ActorMethod<[], Array<GameResult>>,
   'getTotalGames' : ActorMethod<[], bigint>,
+  'joinRoom' : ActorMethod<[string, string, string], [] | [Room]>,
+  'leaveRoom' : ActorMethod<[string, string], boolean>,
   'saveGame' : ActorMethod<[GameResult], undefined>,
+  'startRoom' : ActorMethod<[string, string], boolean>,
 }
 export declare const idlService: IDL.ServiceClass;
 export declare const idlInitArgs: IDL.Type[];

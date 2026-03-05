@@ -93,32 +93,86 @@ export interface Player {
     hero: string;
     name: string;
 }
+export interface Room {
+    status: RoomStatus;
+    code: string;
+    createdAt: bigint;
+    level: bigint;
+    players: Array<RoomPlayer>;
+    hostId: string;
+    maxPlayers: bigint;
+}
 export interface GameResult {
     winnerPlayer: Player;
     players: Array<Player>;
     winnerPlayerIndex: bigint;
     turnsPlayed: bigint;
 }
+export interface RoomPlayer {
+    id: string;
+    name: string;
+    joinedAt: bigint;
+    isHost: boolean;
+}
+export enum RoomStatus {
+    starting = "starting",
+    waiting = "waiting",
+    ready = "ready"
+}
 export interface backendInterface {
+    createRoom(code: string, hostId: string, hostName: string, maxPlayers: bigint, level: bigint): Promise<Room>;
     getMostPopularHero(): Promise<[string, bigint] | null>;
+    getRoomState(code: string): Promise<Room | null>;
     getTop10ByTurns(): Promise<Array<GameResult>>;
     getTotalGames(): Promise<bigint>;
+    joinRoom(code: string, playerId: string, playerName: string): Promise<Room | null>;
+    leaveRoom(code: string, playerId: string): Promise<boolean>;
     saveGame(gameResult: GameResult): Promise<void>;
+    startRoom(code: string, hostId: string): Promise<boolean>;
 }
+import type { Room as _Room, RoomPlayer as _RoomPlayer, RoomStatus as _RoomStatus } from "./declarations/backend.did.d.ts";
 export class Backend implements backendInterface {
     constructor(private actor: ActorSubclass<_SERVICE>, private _uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, private _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, private processError?: (error: unknown) => never){}
+    async createRoom(arg0: string, arg1: string, arg2: string, arg3: bigint, arg4: bigint): Promise<Room> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.createRoom(arg0, arg1, arg2, arg3, arg4);
+                return from_candid_Room_n1(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.createRoom(arg0, arg1, arg2, arg3, arg4);
+            return from_candid_Room_n1(this._uploadFile, this._downloadFile, result);
+        }
+    }
     async getMostPopularHero(): Promise<[string, bigint] | null> {
         if (this.processError) {
             try {
                 const result = await this.actor.getMostPopularHero();
-                return from_candid_opt_n1(this._uploadFile, this._downloadFile, result);
+                return from_candid_opt_n5(this._uploadFile, this._downloadFile, result);
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
             const result = await this.actor.getMostPopularHero();
-            return from_candid_opt_n1(this._uploadFile, this._downloadFile, result);
+            return from_candid_opt_n5(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async getRoomState(arg0: string): Promise<Room | null> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getRoomState(arg0);
+                return from_candid_opt_n6(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getRoomState(arg0);
+            return from_candid_opt_n6(this._uploadFile, this._downloadFile, result);
         }
     }
     async getTop10ByTurns(): Promise<Array<GameResult>> {
@@ -149,6 +203,34 @@ export class Backend implements backendInterface {
             return result;
         }
     }
+    async joinRoom(arg0: string, arg1: string, arg2: string): Promise<Room | null> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.joinRoom(arg0, arg1, arg2);
+                return from_candid_opt_n6(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.joinRoom(arg0, arg1, arg2);
+            return from_candid_opt_n6(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async leaveRoom(arg0: string, arg1: string): Promise<boolean> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.leaveRoom(arg0, arg1);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.leaveRoom(arg0, arg1);
+            return result;
+        }
+    }
     async saveGame(arg0: GameResult): Promise<void> {
         if (this.processError) {
             try {
@@ -163,9 +245,68 @@ export class Backend implements backendInterface {
             return result;
         }
     }
+    async startRoom(arg0: string, arg1: string): Promise<boolean> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.startRoom(arg0, arg1);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.startRoom(arg0, arg1);
+            return result;
+        }
+    }
 }
-function from_candid_opt_n1(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [[string, bigint]]): [string, bigint] | null {
+function from_candid_RoomStatus_n3(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _RoomStatus): RoomStatus {
+    return from_candid_variant_n4(_uploadFile, _downloadFile, value);
+}
+function from_candid_Room_n1(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _Room): Room {
+    return from_candid_record_n2(_uploadFile, _downloadFile, value);
+}
+function from_candid_opt_n5(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [[string, bigint]]): [string, bigint] | null {
     return value.length === 0 ? null : value[0];
+}
+function from_candid_opt_n6(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_Room]): Room | null {
+    return value.length === 0 ? null : from_candid_Room_n1(_uploadFile, _downloadFile, value[0]);
+}
+function from_candid_record_n2(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    status: _RoomStatus;
+    code: string;
+    createdAt: bigint;
+    level: bigint;
+    players: Array<_RoomPlayer>;
+    hostId: string;
+    maxPlayers: bigint;
+}): {
+    status: RoomStatus;
+    code: string;
+    createdAt: bigint;
+    level: bigint;
+    players: Array<RoomPlayer>;
+    hostId: string;
+    maxPlayers: bigint;
+} {
+    return {
+        status: from_candid_RoomStatus_n3(_uploadFile, _downloadFile, value.status),
+        code: value.code,
+        createdAt: value.createdAt,
+        level: value.level,
+        players: value.players,
+        hostId: value.hostId,
+        maxPlayers: value.maxPlayers
+    };
+}
+function from_candid_variant_n4(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    starting: null;
+} | {
+    waiting: null;
+} | {
+    ready: null;
+}): RoomStatus {
+    return "starting" in value ? RoomStatus.starting : "waiting" in value ? RoomStatus.waiting : "ready" in value ? RoomStatus.ready : value;
 }
 export interface CreateActorOptions {
     agent?: Agent;

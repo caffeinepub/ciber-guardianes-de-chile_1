@@ -8,6 +8,26 @@
 
 import { IDL } from '@icp-sdk/core/candid';
 
+export const RoomStatus = IDL.Variant({
+  'starting' : IDL.Null,
+  'waiting' : IDL.Null,
+  'ready' : IDL.Null,
+});
+export const RoomPlayer = IDL.Record({
+  'id' : IDL.Text,
+  'name' : IDL.Text,
+  'joinedAt' : IDL.Int,
+  'isHost' : IDL.Bool,
+});
+export const Room = IDL.Record({
+  'status' : RoomStatus,
+  'code' : IDL.Text,
+  'createdAt' : IDL.Int,
+  'level' : IDL.Nat,
+  'players' : IDL.Vec(RoomPlayer),
+  'hostId' : IDL.Text,
+  'maxPlayers' : IDL.Nat,
+});
 export const Player = IDL.Record({ 'hero' : IDL.Text, 'name' : IDL.Text });
 export const GameResult = IDL.Record({
   'winnerPlayer' : Player,
@@ -17,19 +37,48 @@ export const GameResult = IDL.Record({
 });
 
 export const idlService = IDL.Service({
+  'createRoom' : IDL.Func(
+      [IDL.Text, IDL.Text, IDL.Text, IDL.Nat, IDL.Nat],
+      [Room],
+      [],
+    ),
   'getMostPopularHero' : IDL.Func(
       [],
       [IDL.Opt(IDL.Tuple(IDL.Text, IDL.Nat))],
       ['query'],
     ),
+  'getRoomState' : IDL.Func([IDL.Text], [IDL.Opt(Room)], ['query']),
   'getTop10ByTurns' : IDL.Func([], [IDL.Vec(GameResult)], ['query']),
   'getTotalGames' : IDL.Func([], [IDL.Nat], ['query']),
+  'joinRoom' : IDL.Func([IDL.Text, IDL.Text, IDL.Text], [IDL.Opt(Room)], []),
+  'leaveRoom' : IDL.Func([IDL.Text, IDL.Text], [IDL.Bool], []),
   'saveGame' : IDL.Func([GameResult], [], []),
+  'startRoom' : IDL.Func([IDL.Text, IDL.Text], [IDL.Bool], []),
 });
 
 export const idlInitArgs = [];
 
 export const idlFactory = ({ IDL }) => {
+  const RoomStatus = IDL.Variant({
+    'starting' : IDL.Null,
+    'waiting' : IDL.Null,
+    'ready' : IDL.Null,
+  });
+  const RoomPlayer = IDL.Record({
+    'id' : IDL.Text,
+    'name' : IDL.Text,
+    'joinedAt' : IDL.Int,
+    'isHost' : IDL.Bool,
+  });
+  const Room = IDL.Record({
+    'status' : RoomStatus,
+    'code' : IDL.Text,
+    'createdAt' : IDL.Int,
+    'level' : IDL.Nat,
+    'players' : IDL.Vec(RoomPlayer),
+    'hostId' : IDL.Text,
+    'maxPlayers' : IDL.Nat,
+  });
   const Player = IDL.Record({ 'hero' : IDL.Text, 'name' : IDL.Text });
   const GameResult = IDL.Record({
     'winnerPlayer' : Player,
@@ -39,14 +88,23 @@ export const idlFactory = ({ IDL }) => {
   });
   
   return IDL.Service({
+    'createRoom' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text, IDL.Nat, IDL.Nat],
+        [Room],
+        [],
+      ),
     'getMostPopularHero' : IDL.Func(
         [],
         [IDL.Opt(IDL.Tuple(IDL.Text, IDL.Nat))],
         ['query'],
       ),
+    'getRoomState' : IDL.Func([IDL.Text], [IDL.Opt(Room)], ['query']),
     'getTop10ByTurns' : IDL.Func([], [IDL.Vec(GameResult)], ['query']),
     'getTotalGames' : IDL.Func([], [IDL.Nat], ['query']),
+    'joinRoom' : IDL.Func([IDL.Text, IDL.Text, IDL.Text], [IDL.Opt(Room)], []),
+    'leaveRoom' : IDL.Func([IDL.Text, IDL.Text], [IDL.Bool], []),
     'saveGame' : IDL.Func([GameResult], [], []),
+    'startRoom' : IDL.Func([IDL.Text, IDL.Text], [IDL.Bool], []),
   });
 };
 
