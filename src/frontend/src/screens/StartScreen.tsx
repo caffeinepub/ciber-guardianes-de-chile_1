@@ -17,15 +17,11 @@ import {
   Bot,
   Coins,
   Crown,
-  Key,
   Lock,
-  Shield,
-  ShoppingCart,
   Star,
   Trophy,
   Users,
   Wifi,
-  Zap,
 } from "lucide-react";
 import type React from "react";
 import { useState } from "react";
@@ -39,7 +35,14 @@ import { useActor } from "../hooks/useActor";
 interface StartScreenProps {
   onStartGame: (playerCount: number, level: 1 | 2 | 3) => void;
   onStartAIGame: (level: 1 | 2 | 3) => void;
-  onStartMultiplayerGame?: (playerCount: number, level: 1 | 2 | 3) => void;
+  onStartMultiplayerGame?: (
+    playerCount: number,
+    level: 1 | 2 | 3,
+    localPlayerIndex: number,
+    roomCode?: string,
+    playerId?: string,
+    displayName?: string,
+  ) => void;
   initialRoomCode?: string | null;
 }
 
@@ -251,26 +254,63 @@ export default function StartScreen({
 
       <div className="relative z-10 w-full max-w-2xl px-4 py-6 flex flex-col items-center">
         {/* Logo */}
-        <div className="mb-6 text-center animate-float-in">
-          <div className="flex items-center justify-center gap-3 mb-2">
-            <Zap className="w-7 h-7 text-primary animate-pulse" />
-            <h1
-              className="text-3xl md:text-5xl font-black font-display tracking-tight neon-text-green animate-neon-flicker"
-              style={{ letterSpacing: "-0.02em" }}
-            >
-              CIBER-GUARDIANES
-            </h1>
-            <Zap className="w-7 h-7 text-primary animate-pulse" />
+        <div className="mb-6 w-full animate-float-in">
+          {/* Hero banner image - full width with overlay */}
+          <div
+            className="relative w-full rounded-2xl overflow-hidden mb-4 shadow-2xl"
+            style={{
+              boxShadow:
+                "0 0 40px oklch(0.75 0.25 145 / 0.3), 0 0 80px oklch(0.72 0.22 230 / 0.2)",
+            }}
+          >
+            <img
+              src="/assets/generated/hero-banner-home.dim_1200x600.jpg"
+              alt="Ciber-Guardianes de Chile"
+              className="w-full object-cover"
+              style={{
+                maxHeight: 260,
+                minHeight: 160,
+                objectPosition: "center top",
+              }}
+            />
+            {/* Gradient overlay at bottom for text readability */}
+            <div
+              className="absolute inset-0"
+              style={{
+                background:
+                  "linear-gradient(to bottom, transparent 40%, oklch(0.08 0.02 240 / 0.9) 100%)",
+              }}
+            />
+            {/* Title overlay */}
+            <div className="absolute bottom-0 left-0 right-0 p-4 text-center">
+              <h1
+                className="text-2xl md:text-4xl font-black font-display tracking-tight neon-text-green"
+                style={{
+                  letterSpacing: "-0.02em",
+                  textShadow:
+                    "0 0 30px oklch(0.75 0.25 145), 0 0 60px oklch(0.75 0.25 145 / 0.5)",
+                }}
+              >
+                CIBER-GUARDIANES
+              </h1>
+              <p
+                className="text-sm md:text-base font-display font-bold tracking-[0.3em] uppercase mt-1"
+                style={{
+                  color: "oklch(0.72 0.22 230)",
+                  textShadow: "0 0 15px oklch(0.72 0.22 230)",
+                }}
+              >
+                de Chile
+              </p>
+            </div>
           </div>
-          <p className="text-base md:text-xl font-display font-bold text-foreground/70 tracking-[0.3em] uppercase">
-            de Chile
-          </p>
-          <div className="flex items-center justify-center gap-2 mt-2">
-            <div className="h-px flex-1 max-w-[60px] bg-gradient-to-r from-transparent to-primary/50" />
+          {/* Subtitle line */}
+          <div className="flex items-center justify-center gap-2">
+            <div className="h-px flex-1 max-w-[80px] bg-gradient-to-r from-transparent to-primary/50" />
             <p className="text-xs text-muted-foreground uppercase tracking-widest">
               Protege tu Identidad Digital
             </p>
-            <div className="h-px flex-1 max-w-[60px] bg-gradient-to-l from-transparent to-primary/50" />
+            <div className="h-px flex-1 max-w-[80px] bg-gradient-to-l from-transparent to-primary/50" />
           </div>
         </div>
 

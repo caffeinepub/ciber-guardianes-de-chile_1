@@ -29,7 +29,14 @@ import { useMultiplayerRoom } from "../../hooks/useMultiplayerRoom";
 export interface MultiplayerRoomModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onStartMultiplayerGame?: (playerCount: number, level: 1 | 2 | 3) => void;
+  onStartMultiplayerGame?: (
+    playerCount: number,
+    level: 1 | 2 | 3,
+    localPlayerIndex: number,
+    roomCode?: string,
+    playerId?: string,
+    displayName?: string,
+  ) => void;
   initialRoomCode?: string | null;
 }
 
@@ -204,6 +211,7 @@ export default function MultiplayerRoomModal({
     room,
     myPlayerId,
     isHost,
+    isActorReady,
     createRoom,
     joinRoom,
     leaveRoom,
@@ -216,9 +224,11 @@ export default function MultiplayerRoomModal({
   );
   const [maxPlayers, setMaxPlayers] = useState<2 | 3 | 4>(2);
   const [selectedLevel, setSelectedLevel] = useState<1 | 2 | 3>(1);
+  const [hostName, setHostName] = useState("");
   const [joinCode, setJoinCode] = useState(initialRoomCode ?? "");
   const [joinName, setJoinName] = useState("");
   const [joinError, setJoinError] = useState("");
+  const [createError, setCreateError] = useState("");
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
   const [liveRoom, setLiveRoom] = useState<RoomState | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -228,11 +238,28 @@ export default function MultiplayerRoomModal({
     if (room) {
       setLiveRoom(room);
       if (room.status === "starting" && onStartMultiplayerGame) {
-        onStartMultiplayerGame(room.players.length, room.level);
+        // Calculate this device's player index
+        const localIdx = room.players.findIndex((p) => p.id === myPlayerId);
+        const myDisplayName = joinName.trim() || hostName.trim() || "Jugador";
+        onStartMultiplayerGame(
+          room.players.length,
+          room.level,
+          localIdx >= 0 ? localIdx : 0,
+          room.code,
+          myPlayerId,
+          myDisplayName,
+        );
         onOpenChange(false);
       }
     }
-  }, [room, onStartMultiplayerGame, onOpenChange]);
+  }, [
+    room,
+    onStartMultiplayerGame,
+    onOpenChange,
+    myPlayerId,
+    joinName,
+    hostName,
+  ]);
 
   // Reset state when modal closes
   useEffect(() => {
@@ -240,7 +267,10 @@ export default function MultiplayerRoomModal({
       setView(initialRoomCode ? "join" : "create");
       setJoinCode(initialRoomCode ?? "");
       setJoinError("");
+      setCreateError("");
       setLiveRoom(null);
+      setHostName("");
+      setJoinName("");
     }
   }, [open, initialRoomCode]);
 
@@ -269,17 +299,24 @@ export default function MultiplayerRoomModal({
   }, [joinUrl]);
 
   const handleCreateRoom = useCallback(async () => {
+    if (!isActorReady) return;
     setIsLoading(true);
+    setCreateError("");
     try {
-      const newRoom = await createRoom(maxPlayers, selectedLevel);
+      const name = hostName.trim() || "Anfitrión";
+      const newRoom = await createRoom(maxPlayers, selectedLevel, name);
       if (newRoom) {
         setLiveRoom(newRoom);
         setView("lobby");
+      } else {
+        setCreateError(
+          "No se pudo crear la sala. Verifica tu conexión e inténtalo de nuevo.",
+        );
       }
     } finally {
       setIsLoading(false);
     }
-  }, [createRoom, maxPlayers, selectedLevel]);
+  }, [createRoom, maxPlayers, selectedLevel, hostName, isActorReady]);
 
   const handleJoinRoom = useCallback(async () => {
     const code = joinCode.trim().toUpperCase();
@@ -309,13 +346,31 @@ export default function MultiplayerRoomModal({
     try {
       await startGame();
       if (onStartMultiplayerGame) {
-        onStartMultiplayerGame(liveRoom.players.length, liveRoom.level);
+        // Host is always the first player (index 0)
+        const localIdx = liveRoom.players.findIndex((p) => p.id === myPlayerId);
+        const myDisplayName = hostName.trim() || "Anfitrión";
+        onStartMultiplayerGame(
+          liveRoom.players.length,
+          liveRoom.level,
+          localIdx >= 0 ? localIdx : 0,
+          liveRoom.code,
+          myPlayerId,
+          myDisplayName,
+        );
       }
       onOpenChange(false);
     } finally {
       setIsLoading(false);
     }
-  }, [liveRoom, isHost, startGame, onStartMultiplayerGame, onOpenChange]);
+  }, [
+    liveRoom,
+    isHost,
+    startGame,
+    onStartMultiplayerGame,
+    onOpenChange,
+    myPlayerId,
+    hostName,
+  ]);
 
   const handleLeave = useCallback(async () => {
     setIsLoading(true);
@@ -347,6 +402,21 @@ export default function MultiplayerRoomModal({
             </DialogHeader>
 
             <div className="flex flex-col gap-4">
+              {/* Host name */}
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-1">
+                  Tu nombre
+                </p>
+                <Input
+                  value={hostName}
+                  onChange={(e) => setHostName(e.target.value)}
+                  placeholder="Ej: Jugador1, Carlos..."
+                  maxLength={20}
+                  className="border-slate-600 bg-slate-800 text-white placeholder:text-slate-400"
+                  data-ocid="multiplayer.host_name_input"
+                />
+              </div>
+
               {/* Max players */}
               <div>
                 <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-2">
@@ -439,7 +509,7 @@ export default function MultiplayerRoomModal({
               <Button
                 size="lg"
                 onClick={handleCreateRoom}
-                disabled={isLoading}
+                disabled={isLoading || !isActorReady}
                 className="w-full h-12 rounded-xl font-bold text-sm gap-2"
                 style={{
                   background: "oklch(0.75 0.25 145)",
@@ -449,11 +519,26 @@ export default function MultiplayerRoomModal({
               >
                 {isLoading ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
+                ) : !isActorReady ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
                 ) : (
                   <PlayCircle className="w-5 h-5" />
                 )}
-                {isLoading ? "Creando sala..." : "Crear Sala"}
+                {isLoading
+                  ? "Creando sala..."
+                  : !isActorReady
+                    ? "Conectando..."
+                    : "Crear Sala"}
               </Button>
+
+              {createError && (
+                <p
+                  className="text-[11px] text-destructive text-center mt-1"
+                  data-ocid="multiplayer.create_error_state"
+                >
+                  {createError}
+                </p>
+              )}
 
               <div className="relative flex items-center gap-2">
                 <div className="flex-1 h-px bg-border" />
@@ -572,7 +657,7 @@ export default function MultiplayerRoomModal({
                   {liveRoom.players.map((player, i) => (
                     <PlayerRow
                       key={player.id}
-                      name={player.name}
+                      name={player.displayName || player.name}
                       isHost={player.isHost}
                       isOnline
                       index={i}
@@ -775,8 +860,8 @@ export default function MultiplayerRoomModal({
                       key={player.id}
                       name={
                         player.id === myPlayerId
-                          ? `${player.name} (Tú)`
-                          : player.name
+                          ? `${player.displayName || player.name} (Tú)`
+                          : player.displayName || player.name
                       }
                       isHost={player.isHost}
                       isOnline

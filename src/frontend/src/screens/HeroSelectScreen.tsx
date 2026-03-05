@@ -1,5 +1,6 @@
 // ─── HeroSelectScreen ────────────────────────────────────────────────────────
 // Each player selects a hero sequentially. Shows passive ability info.
+// In multiplayer per-device mode: polls room state to show taken heroes.
 
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +16,8 @@ import type React from "react";
 import { useState } from "react";
 import { HEROES } from "../data/heroes";
 import type { HeroId } from "../game/gameTypes";
+import { useActor } from "../hooks/useActor";
+import { useHeroSelectionSync } from "../hooks/useGameSync";
 
 interface HeroSelectScreenProps {
   playerCount: number;
@@ -23,6 +26,18 @@ interface HeroSelectScreenProps {
   onSelectHero: (heroId: HeroId) => void;
   onConfirm: () => void;
   isAIMode?: boolean;
+  /** True when this device is one of several in a multiplayer session */
+  isMultiplayerDevice?: boolean;
+  /** This device's player index (used in multiplayer mode) */
+  localPlayerIndex?: number;
+  /** Heroes already chosen by other devices (shown as "En uso") */
+  externalTakenHeroes?: HeroId[];
+  /** Room code for multiplayer hero sync */
+  roomCode?: string | null;
+  /** This player's id for multiplayer hero sync */
+  myPlayerId?: string | null;
+  /** Called when hero selection changes in multiplayer mode (to publish to room) */
+  onHeroChange?: (heroId: HeroId) => void;
 }
 
 const ROLE_ICONS: Record<string, React.ElementType> = {
@@ -53,16 +68,45 @@ export default function HeroSelectScreen({
   onSelectHero,
   onConfirm,
   isAIMode = false,
+  isMultiplayerDevice = false,
+  localPlayerIndex = 0,
+  externalTakenHeroes = [],
+  roomCode = null,
+  myPlayerId = null,
+  onHeroChange,
 }: HeroSelectScreenProps) {
   const [_hoveredId, setHoveredId] = useState<HeroId | null>(null);
+  const { actor } = useActor();
+
+  // Poll for heroes selected by other devices in multiplayer
+  const { takenHeroes: syncedTakenHeroes } = useHeroSelectionSync({
+    roomCode: isMultiplayerDevice ? (roomCode ?? null) : null,
+    myPlayerId: myPlayerId ?? "",
+    actor,
+    enabled: isMultiplayerDevice && !!roomCode && !!myPlayerId,
+  });
+
   const takenHeroes = heroSelections
     .slice(0, heroSelectStep)
     .filter(Boolean) as HeroId[];
 
   const currentSelection = heroSelections[heroSelectStep];
 
-  // In AI mode, only show player 1 selection step indicator (not AI)
-  const displayPlayerCount = isAIMode ? 1 : playerCount;
+  // Merge external taken heroes from props AND from live sync
+  const allExternalTaken = [
+    ...externalTakenHeroes,
+    ...syncedTakenHeroes,
+  ] as HeroId[];
+
+  // In AI mode or multiplayer per-device, only show player 1 selection step indicator
+  const displayPlayerCount = isAIMode || isMultiplayerDevice ? 1 : playerCount;
+
+  const handleHeroSelect = (heroId: HeroId) => {
+    onSelectHero(heroId);
+    if (onHeroChange) {
+      onHeroChange(heroId);
+    }
+  };
 
   return (
     <div className="min-h-screen circuit-bg flex flex-col items-center justify-center p-4">
@@ -86,17 +130,39 @@ export default function HeroSelectScreen({
           ))}
         </div>
         <h2 className="text-2xl md:text-3xl font-black font-display neon-text-green">
-          {isAIMode ? "¡Elige tu Héroe!" : `Jugador ${heroSelectStep + 1}`}
+          {isAIMode
+            ? "¡Elige tu Héroe!"
+            : isMultiplayerDevice
+              ? `Jugador ${localPlayerIndex + 1} — Elige tu Héroe`
+              : `Jugador ${heroSelectStep + 1}`}
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
           {isAIMode
             ? "La IA elegirá su héroe automáticamente"
-            : "Elige tu Héroe Guardián"}
+            : isMultiplayerDevice
+              ? "Cada jugador elige su héroe en su dispositivo"
+              : "Elige tu Héroe Guardián"}
         </p>
         {isAIMode && (
           <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-purple-400 bg-purple-500/10 border border-purple-500/30 rounded-full px-3 py-1">
             <span>🤖</span>
             <span>Modo 1 Jugador vs IA</span>
+          </div>
+        )}
+        {isMultiplayerDevice && !isAIMode && (
+          <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-blue-400 bg-blue-500/10 border border-blue-500/30 rounded-full px-3 py-1">
+            <span>🌐</span>
+            <span>
+              Partida Multijugador · Dispositivo {localPlayerIndex + 1}
+            </span>
+          </div>
+        )}
+        {isMultiplayerDevice && syncedTakenHeroes.length > 0 && (
+          <div className="mt-1 flex items-center justify-center gap-1.5 text-[10px] text-orange-400 bg-orange-500/10 border border-orange-500/30 rounded-full px-3 py-1">
+            <span>🔒</span>
+            <span>
+              {syncedTakenHeroes.length} héroe(s) tomados por otros jugadores
+            </span>
           </div>
         )}
       </div>
@@ -107,7 +173,9 @@ export default function HeroSelectScreen({
         style={{ animationDelay: "0.1s" }}
       >
         {HEROES.map((hero, idx) => {
-          const isTaken = takenHeroes.includes(hero.id);
+          const isTakenLocally = takenHeroes.includes(hero.id);
+          const isTakenExternally = allExternalTaken.includes(hero.id);
+          const isTaken = isTakenLocally || isTakenExternally;
           const isSelected = currentSelection === hero.id;
           const RoleIcon = ROLE_ICONS[hero.role] ?? Shield;
 
@@ -116,7 +184,7 @@ export default function HeroSelectScreen({
               type="button"
               key={hero.id}
               disabled={isTaken}
-              onClick={() => !isTaken && onSelectHero(hero.id)}
+              onClick={() => !isTaken && handleHeroSelect(hero.id)}
               onMouseEnter={() => setHoveredId(hero.id)}
               onMouseLeave={() => setHoveredId(null)}
               className={`
@@ -142,10 +210,20 @@ export default function HeroSelectScreen({
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
 
-                {/* Taken overlay */}
-                {isTaken && (
+                {/* Taken overlay — locally taken */}
+                {isTakenLocally && !isTakenExternally && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/60">
                     <Lock className="w-8 h-8 text-muted-foreground" />
+                  </div>
+                )}
+
+                {/* Taken overlay — externally taken (by another device) */}
+                {isTakenExternally && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 gap-1">
+                    <Lock className="w-6 h-6 text-orange-400" />
+                    <span className="text-[9px] font-bold text-orange-400 bg-orange-500/20 border border-orange-500/40 px-2 py-0.5 rounded-full uppercase tracking-wide">
+                      En uso
+                    </span>
                   </div>
                 )}
 
@@ -191,7 +269,11 @@ export default function HeroSelectScreen({
           className="bg-primary text-primary-foreground font-bold text-base h-12 px-8 rounded-xl disabled:opacity-50"
           data-ocid="hero_select.confirm_button"
         >
-          {isAIMode ? "¡Jugar vs IA!" : "Confirmar Héroe"}
+          {isAIMode
+            ? "¡Jugar vs IA!"
+            : isMultiplayerDevice
+              ? "¡Confirmar y Entrar!"
+              : "Confirmar Héroe"}
           <ChevronRight className="w-5 h-5 ml-1" />
         </Button>
         {!currentSelection && (

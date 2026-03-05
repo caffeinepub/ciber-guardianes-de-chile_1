@@ -4,11 +4,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Room as CanisterRoom } from "../backend.d";
+import {
+  decodePlayerName,
+  encodePlayerName,
+} from "../game/gameStateSerializer";
 import { useActor } from "./useActor";
 
 export type RoomPlayer = {
   id: string;
   name: string;
+  displayName: string; // parsed from encoded name
+  heroId: string; // parsed from encoded name
   isHost: boolean;
   joinedAt: number;
 };
@@ -49,12 +55,17 @@ function getMyPlayerId(): string {
 function toRoomState(r: CanisterRoom): RoomState {
   return {
     code: r.code,
-    players: r.players.map((p) => ({
-      id: p.id,
-      name: p.name,
-      isHost: p.isHost,
-      joinedAt: Number(p.joinedAt),
-    })),
+    players: r.players.map((p) => {
+      const { name: displayName, heroId } = decodePlayerName(p.name);
+      return {
+        id: p.id,
+        name: p.name,
+        displayName: displayName || p.name,
+        heroId,
+        isHost: p.isHost,
+        joinedAt: Number(p.joinedAt),
+      };
+    }),
     maxPlayers: Math.min(4, Math.max(2, Number(r.maxPlayers))) as 2 | 3 | 4,
     level: Math.min(3, Math.max(1, Number(r.level))) as 1 | 2 | 3,
     status: r.status as "waiting" | "ready" | "starting",
@@ -78,6 +89,8 @@ export function useMultiplayerRoom() {
   const [room, setRoom] = useState<RoomState | null>(null);
   const [myPlayerId] = useState(getMyPlayerId);
   const [roomCodeFromUrl, setRoomCodeFromUrl] = useState<string | null>(null);
+  const [myDisplayName, setMyDisplayName] = useState("Jugador");
+  const [myHeroId, setMyHeroIdState] = useState("");
   const channelRef = useRef<BroadcastChannel | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const roomCodeRef = useRef<string | null>(null);
@@ -161,14 +174,19 @@ export function useMultiplayerRoom() {
     async (
       maxPlayers: 2 | 3 | 4,
       level: 1 | 2 | 3,
+      displayName?: string,
     ): Promise<RoomState | null> => {
       if (!actor) return null;
       const code = generateRoomCode();
+      const hostName = displayName ?? "Anfitrión";
+      setMyDisplayName(hostName);
+      // Encode hero as empty until hero selection happens
+      const encodedName = encodePlayerName(hostName, "");
       try {
         const canisterRoom = await actor.createRoom(
           code,
           myPlayerId,
-          "Jugador 1 (Anfitrión)",
+          encodedName,
           BigInt(maxPlayers),
           BigInt(level),
         );
@@ -176,7 +194,8 @@ export function useMultiplayerRoom() {
         broadcastRoomUpdate(newRoom);
         setRoom(newRoom);
         return newRoom;
-      } catch {
+      } catch (e) {
+        console.error("createRoom failed:", e);
         return null;
       }
     },
@@ -186,11 +205,14 @@ export function useMultiplayerRoom() {
   const joinRoom = useCallback(
     async (code: string, playerName?: string): Promise<RoomState | null> => {
       if (!actor) return null;
+      const displayName = playerName ?? "Jugador";
+      setMyDisplayName(displayName);
+      const encodedName = encodePlayerName(displayName, "");
       try {
         const canisterRoom = await actor.joinRoom(
           code.toUpperCase(),
           myPlayerId,
-          playerName ?? "Jugador",
+          encodedName,
         );
         if (!canisterRoom) return null;
         const joined = toRoomState(canisterRoom);
@@ -202,6 +224,22 @@ export function useMultiplayerRoom() {
       }
     },
     [actor, myPlayerId],
+  );
+
+  /** Update the hero ID in the canister player name (during hero selection) */
+  const setMyHeroId = useCallback(
+    async (heroId: string): Promise<void> => {
+      if (!actor || !room) return;
+      setMyHeroIdState(heroId);
+      const encodedName = encodePlayerName(myDisplayName, heroId);
+      try {
+        await actor.leaveRoom(room.code, myPlayerId);
+        await actor.joinRoom(room.code, myPlayerId, encodedName);
+      } catch {
+        // best-effort
+      }
+    },
+    [actor, room, myPlayerId, myDisplayName],
   );
 
   const leaveRoom = useCallback(async () => {
@@ -241,17 +279,23 @@ export function useMultiplayerRoom() {
   }, []);
 
   const isHost = room?.hostId === myPlayerId;
+  const isActorReady = !!actor;
 
   return {
     room,
     myPlayerId,
+    myDisplayName,
+    myHeroId,
     roomCodeFromUrl,
     isHost,
+    isActorReady,
     createRoom,
     joinRoom,
+    setMyHeroId,
     leaveRoom,
     startGame,
     refreshRoom,
     getJoinUrl,
+    actor,
   };
 }

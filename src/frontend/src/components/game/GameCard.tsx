@@ -2,7 +2,7 @@
 // Full TCG-style card with type-specific framing, glowing borders, art area,
 // power badge, and didactic footer. Memoized for performance.
 
-import { Cpu, Shield, Skull, Zap } from "lucide-react";
+import { Shield, Skull, Zap } from "lucide-react";
 import React from "react";
 import type { CardDefinition } from "../../game/gameTypes";
 
@@ -140,51 +140,33 @@ const GameCard = React.memo(function GameCard({
   if (isFaceDown) {
     return (
       <div
-        className="flex-shrink-0 rounded-lg overflow-hidden"
+        className={`flex-shrink-0 rounded-lg overflow-hidden ${animClass}`}
         style={{
           width: dim.w,
           height: dim.h,
-          background: "linear-gradient(135deg, #0d1b2a 0%, #050d14 100%)",
-          border: `${dim.borderW}px solid #1e3a5f`,
-          boxShadow: "0 0 8px rgba(30,58,95,0.5)",
+          border: `${dim.borderW}px solid #1e3a8f`,
+          boxShadow: isSelected
+            ? "0 0 0 2px #42a5f5, 0 0 20px rgba(66,165,245,0.6)"
+            : "0 0 10px rgba(30,58,143,0.5)",
           position: "relative",
+          cursor: onClick ? "pointer" : "default",
         }}
+        role={onClick ? "button" : undefined}
+        tabIndex={onClick ? 0 : undefined}
+        onClick={onClick}
+        onKeyDown={onClick ? (e) => e.key === "Enter" && onClick() : undefined}
       >
-        {/* Hexagonal back pattern */}
-        <div
+        <img
+          src="/assets/generated/card-back-design.dim_400x560.png"
+          alt="Carta"
           style={{
-            position: "absolute",
-            inset: 0,
-            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='24'%3E%3Cpath d='M14 0 L28 8 L28 16 L14 24 L0 16 L0 8Z' fill='none' stroke='%231e3a5f' stroke-width='0.5'/%3E%3C/svg%3E")`,
-            backgroundSize: "28px 24px",
-            opacity: 0.4,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            display: "block",
           }}
+          loading="lazy"
         />
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            background:
-              "radial-gradient(ellipse at 50% 50%, rgba(30,100,180,0.15) 0%, transparent 70%)",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Cpu
-            style={{
-              width: dim.w * 0.3,
-              height: dim.w * 0.3,
-              color: "rgba(66,165,245,0.3)",
-            }}
-          />
-        </div>
       </div>
     );
   }

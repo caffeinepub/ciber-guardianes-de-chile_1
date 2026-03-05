@@ -13,7 +13,14 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { ChevronRight, Cpu, Flag, RotateCcw } from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { ChevronRight, Cpu, Flag, List, RotateCcw } from "lucide-react";
 import React, {
   useCallback,
   useEffect,
@@ -39,7 +46,10 @@ import {
   resolveAttack,
   surrenderPlayer,
 } from "../game/gameEngine";
+import { makeRng, roomCodeToSeed } from "../game/gameStateSerializer";
 import type { CardDefinition, GameState, HeroId } from "../game/gameTypes";
+import { useActor } from "../hooks/useActor";
+import { useGameSync } from "../hooks/useGameSync";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,6 +72,18 @@ interface GameScreenProps {
   onGameOver: (state: GameState) => void;
   gameLevel?: 1 | 2 | 3;
   isAIMode?: boolean;
+  /** null = shared screen mode; number = this device's player index in multiplayer */
+  localPlayerIndex?: number | null;
+  /** Room code for cross-device multiplayer sync */
+  roomCode?: string | null;
+  /** This player's ID for multiplayer sync */
+  myPlayerId?: string | null;
+  /** This player's display name for multiplayer sync */
+  myDisplayName?: string;
+  /** This player's hero ID for multiplayer sync */
+  myHeroId?: string;
+  /** Whether cross-device sync is active */
+  isMultiplayerSync?: boolean;
 }
 
 // ── Reducer ──────────────────────────────────────────────────────────────────
@@ -221,6 +243,7 @@ interface TurnTransitionProps {
   heroColor: string;
   onDone: () => void;
   isAI?: boolean;
+  isMultiplayerSync?: boolean;
 }
 
 function TurnTransitionOverlay({
@@ -230,6 +253,7 @@ function TurnTransitionOverlay({
   heroColor,
   onDone,
   isAI = false,
+  isMultiplayerSync = false,
 }: TurnTransitionProps) {
   const [countdown, setCountdown] = useState(isAI ? 1 : 3);
 
@@ -251,12 +275,12 @@ function TurnTransitionOverlay({
         backdropFilter: "blur(10px)",
       }}
     >
-      {/* Battle background at 20% */}
+      {/* Battle background at 25% */}
       <img
-        src="/assets/generated/battle-background.dim_1920x1080.jpg"
+        src="/assets/generated/battle-arena-bg.dim_1920x1080.jpg"
         alt=""
         className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-        style={{ opacity: 0.2 }}
+        style={{ opacity: 0.25 }}
         aria-hidden="true"
       />
 
@@ -359,7 +383,11 @@ function TurnTransitionOverlay({
               boxShadow: `0 0 15px ${heroColor.replace("oklch(", "oklch(").replace(")", " / 0.2)")}`,
             }}
           >
-            {isAI ? "🤖 TURNO DE LA IA" : "📲 PASA EL DISPOSITIVO"}
+            {isAI
+              ? "🤖 TURNO DE LA IA"
+              : isMultiplayerSync
+                ? "⏳ TURNO DEL OTRO JUGADOR"
+                : "📲 PASA EL DISPOSITIVO"}
           </div>
         </div>
 
@@ -449,6 +477,76 @@ const HERO_ULTIMATE_EFFECTS: Record<string, string> = {
   gato: "¡Reinicio total! Tu mano actual se descarta y recibes 5 cartas nuevas. Sistema restaurado a estado óptimo.",
 };
 
+// ── Log type → color helper ──────────────────────────────────────────────────
+const LOG_TYPE_BORDER: Record<string, string> = {
+  attack: "border-red-500/60",
+  defense: "border-blue-500/60",
+  action: "border-yellow-500/60",
+  heal: "border-green-500/60",
+  system: "border-border",
+  eliminate: "border-orange-500/60",
+};
+
+const LOG_TYPE_ICON: Record<string, string> = {
+  attack: "⚔️",
+  defense: "🛡️",
+  action: "⚡",
+  heal: "💚",
+  system: "🔧",
+  eliminate: "💀",
+};
+
+// ── ActionToast — shows last log entry as a transient popup on mobile ────────
+interface ActionToastProps {
+  entry: { id: string; type: string; message: string } | null;
+}
+
+function ActionToast({ entry }: ActionToastProps) {
+  const [visible, setVisible] = useState(false);
+  const [currentEntry, setCurrentEntry] = useState(entry);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only trigger on new log id, not every reference update
+  useEffect(() => {
+    if (!entry) return;
+    setCurrentEntry(entry);
+    setVisible(true);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setVisible(false), 3000);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [entry?.id]);
+
+  if (!currentEntry) return null;
+
+  return (
+    <div
+      className={`
+        md:hidden fixed bottom-24 left-4 right-4 z-40 pointer-events-none
+        transition-all duration-500 ease-in-out
+        ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}
+      `}
+    >
+      <div
+        className={`
+          flex items-start gap-2 px-3 py-2.5 rounded-xl border
+          bg-card/90 backdrop-blur-md shadow-lg
+          ${LOG_TYPE_BORDER[currentEntry.type] ?? "border-border"}
+        `}
+        style={{ boxShadow: "0 0 20px oklch(0.1 0.05 240 / 0.8)" }}
+      >
+        <span className="text-base flex-shrink-0 mt-0.5">
+          {LOG_TYPE_ICON[currentEntry.type] ?? "•"}
+        </span>
+        <p className="text-[11px] leading-tight text-foreground line-clamp-2">
+          {currentEntry.message}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function GameScreen({
@@ -457,13 +555,36 @@ export default function GameScreen({
   onGameOver,
   gameLevel = 1,
   isAIMode = false,
+  localPlayerIndex = null,
+  roomCode = null,
+  myPlayerId = null,
+  myDisplayName = "Jugador",
+  myHeroId = "",
+  isMultiplayerSync = false,
 }: GameScreenProps) {
+  const { actor } = useActor();
+
   const [state, dispatch] = useReducer(gameReducer, null, () => {
-    const initialState = createInitialState(
-      playerCount,
-      heroSelections,
-      gameLevel,
-    );
+    // In multiplayer sync mode, use a seeded deck so all devices get identical initial state
+    let initialState: GameState;
+    if (isMultiplayerSync && roomCode) {
+      const seed = roomCodeToSeed(roomCode);
+      const rng = makeRng(seed);
+      const origRandom = Math.random;
+      Math.random = rng;
+      try {
+        initialState = createInitialState(
+          playerCount,
+          heroSelections,
+          gameLevel,
+        );
+      } finally {
+        Math.random = origRandom;
+      }
+    } else {
+      initialState = createInitialState(playerCount, heroSelections, gameLevel);
+    }
+
     if (isAIMode && initialState.players.length > 1) {
       // Rename player 2 to "IA - HeroName"
       const aiHero = getHeroById(initialState.players[1].heroId);
@@ -477,6 +598,17 @@ export default function GameScreen({
         ),
       };
     }
+
+    // In multiplayer mode, set player names from displayName
+    if (isMultiplayerSync && localPlayerIndex !== null) {
+      return {
+        ...initialState,
+        players: initialState.players.map((p, i) =>
+          i === localPlayerIndex ? { ...p, name: myDisplayName } : p,
+        ),
+      };
+    }
+
     return initialState;
   });
 
@@ -507,6 +639,37 @@ export default function GameScreen({
   // Card detail overlay (from top bar deck/discard)
   const [detailCard, setDetailCard] = useState<CardDefinition | null>(null);
 
+  // Mobile log sheet
+  const [isLogSheetOpen, setIsLogSheetOpen] = useState(false);
+
+  // ── Multiplayer sync ──────────────────────────────────────────────────────
+  const safeLocalIndexForSync: number =
+    localPlayerIndex !== null && localPlayerIndex !== undefined
+      ? (localPlayerIndex as number)
+      : 0;
+
+  const { remoteAction, isSyncing, publishAction, consumeRemoteAction } =
+    useGameSync({
+      roomCode: isMultiplayerSync ? roomCode : null,
+      myPlayerId: myPlayerId ?? "",
+      myDisplayName,
+      myHeroId,
+      playerIndex: safeLocalIndexForSync,
+      actor,
+      enabled: isMultiplayerSync,
+    });
+
+  // Consume remote actions and dispatch them locally
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only react to new remote actions
+  useEffect(() => {
+    if (!isMultiplayerSync || !remoteAction) return;
+    const action = remoteAction.action as Action;
+    if (action?.type) {
+      dispatch(action);
+    }
+    consumeRemoteAction();
+  }, [remoteAction, isMultiplayerSync]);
+
   // Track prev player index to detect turn change
   const prevPlayerIndexRef = useRef(state.currentPlayerIndex);
   const isFirstRender = useRef(true);
@@ -520,6 +683,27 @@ export default function GameScreen({
 
   const currentPlayer = getCurrentPlayer(state);
   const currentHero = getHeroById(currentPlayer.heroId);
+
+  // ── Per-device multiplayer: derive local player and turn state ─────────────
+  // When localPlayerIndex is set, this device always shows their own player zone
+  // and can only act when it's their turn.
+  const isPerDevice =
+    localPlayerIndex !== null && localPlayerIndex !== undefined;
+  const safeLocalIndex: number = isPerDevice ? (localPlayerIndex as number) : 0;
+  const localPlayer = isPerDevice
+    ? (state.players[safeLocalIndex] ?? currentPlayer)
+    : currentPlayer;
+  const localHero = getHeroById(localPlayer.heroId);
+
+  // Is it my turn? (for per-device mode)
+  const isMyTurn = isPerDevice
+    ? state.currentPlayerIndex === safeLocalIndex
+    : true;
+
+  // Am I the target of a pending attack? (for per-device mode)
+  const isMyDefenseTurn = isPerDevice
+    ? state.pendingAttack?.targetPlayerId === localPlayer.id
+    : true;
 
   // Detect server damage → hero-hit animation
   useEffect(() => {
@@ -611,49 +795,81 @@ export default function GameScreen({
     }
   }, [state.heroActionEvent]);
 
-  const handleSelectCard = useCallback((idx: number) => {
-    dispatch({ type: "SELECT_CARD", index: idx });
-  }, []);
+  // ── Multiplayer action dispatcher ─────────────────────────────────────────
+  // Wraps dispatch to also publish to canister for cross-device sync
+  const isMyTurnForDispatch =
+    localPlayerIndex !== null
+      ? state.currentPlayerIndex === (localPlayerIndex as number)
+      : true;
 
-  const handleSelectTarget = useCallback((targetId: number) => {
-    dispatch({ type: "SELECT_TARGET", targetId });
-  }, []);
+  const syncDispatch = useCallback(
+    (action: Action) => {
+      dispatch(action);
+      // Publish to canister relay if in multiplayer sync mode and it's our turn
+      // Defense actions are published even when it's not "our turn" (we're the defender)
+      if (isMultiplayerSync) {
+        const isDefenseAction =
+          action.type === "DEFEND" || action.type === "SKIP_DEFENSE";
+        if (isMyTurnForDispatch || isDefenseAction) {
+          // Fire-and-forget
+          void publishAction(action as Record<string, unknown>);
+        }
+      }
+    },
+    [isMultiplayerSync, isMyTurnForDispatch, publishAction],
+  );
+
+  const handleSelectCard = useCallback(
+    (idx: number) => {
+      syncDispatch({ type: "SELECT_CARD", index: idx });
+    },
+    [syncDispatch],
+  );
+
+  const handleSelectTarget = useCallback(
+    (targetId: number) => {
+      syncDispatch({ type: "SELECT_TARGET", targetId });
+    },
+    [syncDispatch],
+  );
 
   const handleDefend = useCallback(
     (card: CardDefinition) => {
-      dispatch({ type: "DEFEND", card });
-      setDefendingPlayerId(currentPlayer.id);
+      syncDispatch({ type: "DEFEND", card });
+      setDefendingPlayerId(isPerDevice ? localPlayer.id : currentPlayer.id);
       setTimeout(() => setDefendingPlayerId(null), 900);
     },
-    [currentPlayer.id],
+    [syncDispatch, currentPlayer.id, localPlayer.id, isPerDevice],
   );
 
   const handleSkipDefense = useCallback(() => {
-    dispatch({ type: "SKIP_DEFENSE" });
-  }, []);
+    syncDispatch({ type: "SKIP_DEFENSE" });
+  }, [syncDispatch]);
 
   const handleSaberConfirm = useCallback(() => {
-    dispatch({ type: "SABER_CONFIRM" });
+    syncDispatch({ type: "SABER_CONFIRM" });
     setCardsPlayedThisTurn((n) => n + 1);
-  }, []);
+  }, [syncDispatch]);
 
   const handleSaberSkip = useCallback(() => {
-    dispatch({ type: "SABER_SKIP" });
+    syncDispatch({ type: "SABER_SKIP" });
     setCardsPlayedThisTurn((n) => n + 1);
-  }, []);
+  }, [syncDispatch]);
 
   const handleEndTurn = useCallback(() => {
-    dispatch({ type: "END_TURN" });
+    syncDispatch({ type: "END_TURN" });
     setCardsPlayedThisTurn(0);
-  }, []);
+  }, [syncDispatch]);
 
   const handleSurrender = useCallback(() => {
-    dispatch({ type: "SURRENDER", playerId: currentPlayer.id });
-  }, [currentPlayer.id]);
+    const playerId = isPerDevice ? localPlayer.id : currentPlayer.id;
+    syncDispatch({ type: "SURRENDER", playerId });
+  }, [syncDispatch, currentPlayer.id, localPlayer.id, isPerDevice]);
 
   const handleHeroUltimate = useCallback(() => {
-    dispatch({ type: "HERO_ULTIMATE", playerId: currentPlayer.id });
-  }, [currentPlayer.id]);
+    const playerId = isPerDevice ? localPlayer.id : currentPlayer.id;
+    syncDispatch({ type: "HERO_ULTIMATE", playerId });
+  }, [syncDispatch, currentPlayer.id, localPlayer.id, isPerDevice]);
 
   const handleTurnTransitionDone = useCallback(() => {
     setShowTurnTransition(false);
@@ -804,25 +1020,33 @@ export default function GameScreen({
   }, [state.currentPlayerIndex]);
 
   const cardSize = playerCount >= 3 ? "sm" : "md";
+
+  // In per-device mode the "current" player for rendering the bottom zone is
+  // always the local player. Opponents are everyone else.
+  const bottomZonePlayer = isPerDevice ? localPlayer : currentPlayer;
   const opponentPlayers = state.players.filter(
-    (p) => p.id !== currentPlayer.id,
+    (p) => p.id !== bottomZonePlayer.id,
   );
 
+  // Can play cards: only when it's my turn (per-device) or always in shared mode
   const canPlayCards =
     state.currentPhase === "play" &&
     cardsPlayedThisTurn < GAME_CONSTANTS.CARDS_PER_TURN &&
-    !currentPlayer.blockedTurns;
+    !currentPlayer.blockedTurns &&
+    (isPerDevice ? isMyTurn : true);
 
   const isSelectingTarget =
     state.selectedCardIndex !== null &&
-    currentPlayer.hand[state.selectedCardIndex]?.type === "villain";
+    currentPlayer.hand[state.selectedCardIndex]?.type === "villain" &&
+    (isPerDevice ? isMyTurn : true);
 
   const isSelectingActionTarget =
     state.selectedCardIndex !== null &&
-    currentPlayer.hand[state.selectedCardIndex]?.type === "action";
+    currentPlayer.hand[state.selectedCardIndex]?.type === "action" &&
+    (isPerDevice ? isMyTurn : true);
 
   const heroUltimateUsedByCurrentPlayer = state.heroUltimateUsed.includes(
-    currentPlayer.id,
+    bottomZonePlayer.id,
   );
 
   const roundProgress = Math.min((state.round / state.maxRounds) * 100, 100);
@@ -831,16 +1055,19 @@ export default function GameScreen({
   const defenderPlayer = state.pendingAttack
     ? state.players.find((p) => p.id === state.pendingAttack?.targetPlayerId)
     : null;
-  const defenderIsCurrentPlayer = defenderPlayer?.id === currentPlayer.id;
+  // In per-device mode: only show defense overlay to the targeted device
+  const defenderIsCurrentPlayer = isPerDevice
+    ? isMyDefenseTurn
+    : defenderPlayer?.id === currentPlayer.id;
 
   return (
     <div className="relative min-h-screen bg-background flex flex-col p-2 gap-2 max-h-screen overflow-hidden">
       {/* Battle background */}
       <img
-        src="/assets/generated/battle-background.dim_1920x1080.jpg"
+        src="/assets/generated/battle-arena-bg.dim_1920x1080.jpg"
         alt=""
         className="absolute inset-0 w-full h-full object-cover pointer-events-none z-0"
-        style={{ opacity: 0.12 }}
+        style={{ opacity: 0.22 }}
         aria-hidden="true"
       />
 
@@ -879,15 +1106,24 @@ export default function GameScreen({
                   }`}
                 />
                 <span className="text-xs font-bold text-foreground">
-                  {currentPlayer.name}
-                  {currentHero && ` · ${currentHero.name.split('"')[1] ?? ""}`}
+                  {isPerDevice
+                    ? `${localPlayer.name} · ${localHero?.name.split('"')[1] ?? ""}`
+                    : `${currentPlayer.name}${currentHero ? ` · ${currentHero.name.split('"')[1] ?? ""}` : ""}`}
                 </span>
                 <span className="text-[10px] text-muted-foreground">
-                  {state.currentPhase === "draw"
-                    ? "Fase: Conexión"
-                    : state.currentPhase === "play"
-                      ? `Fase: Ejecución (${cardsPlayedThisTurn}/${GAME_CONSTANTS.CARDS_PER_TURN})`
-                      : "Fase: Sincronización"}
+                  {isPerDevice
+                    ? isMyTurn
+                      ? state.currentPhase === "draw"
+                        ? "Tu turno — Conexión"
+                        : state.currentPhase === "play"
+                          ? `Tu turno — Ejecución (${cardsPlayedThisTurn}/${GAME_CONSTANTS.CARDS_PER_TURN})`
+                          : "Tu turno — Sincronización"
+                      : `Turno de ${currentPlayer.name}`
+                    : state.currentPhase === "draw"
+                      ? "Fase: Conexión"
+                      : state.currentPhase === "play"
+                        ? `Fase: Ejecución (${cardsPlayedThisTurn}/${GAME_CONSTANTS.CARDS_PER_TURN})`
+                        : "Fase: Sincronización"}
                 </span>
               </div>
             </div>
@@ -903,33 +1139,41 @@ export default function GameScreen({
               </div>
             )}
 
+            {/* Per-device: waiting message when not my turn */}
+            {isPerDevice && !isMyTurn && !showTurnTransition && (
+              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground bg-muted/20 border border-border rounded-lg px-2 py-1">
+                <span className="animate-pulse">⏳</span>
+                <span>Turno de {currentPlayer.name}</span>
+              </div>
+            )}
+
+            {/* Syncing indicator for multiplayer */}
+            {isMultiplayerSync && isSyncing && (
+              <div className="flex items-center gap-1.5 text-[10px] text-cyan-400 bg-cyan-500/10 border border-cyan-500/30 rounded-lg px-2 py-1 animate-pulse">
+                <span>🔄</span>
+                <span>Sincronizando...</span>
+              </div>
+            )}
+
+            {/* Draw button — only show when it's my turn (or shared mode) */}
             {state.currentPhase === "draw" &&
               !showTurnTransition &&
-              state.currentPlayerIndex !== 1 && (
-                <Button
-                  size="sm"
-                  onClick={() => dispatch({ type: "DRAW_PHASE" })}
-                  className="bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 hover:bg-yellow-500/30 text-[10px] h-7"
-                  data-ocid="game.draw_deck_button"
-                >
-                  📡 Robar Carta
-                </Button>
-              )}
-            {state.currentPhase === "draw" &&
-              !showTurnTransition &&
-              !isAIMode &&
-              state.currentPlayerIndex === 1 && (
-                <Button
-                  size="sm"
-                  onClick={() => dispatch({ type: "DRAW_PHASE" })}
-                  className="bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 hover:bg-yellow-500/30 text-[10px] h-7"
-                  data-ocid="game.draw_deck_button"
-                >
-                  📡 Robar Carta
-                </Button>
-              )}
-            {(state.currentPhase === "play" || state.currentPhase === "end") &&
+              (!isPerDevice || isMyTurn) &&
               !(isAIMode && state.currentPlayerIndex === 1) && (
+                <Button
+                  size="sm"
+                  onClick={() => syncDispatch({ type: "DRAW_PHASE" })}
+                  className="bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 hover:bg-yellow-500/30 text-[10px] h-7"
+                  data-ocid="game.draw_deck_button"
+                >
+                  📡 Robar Carta
+                </Button>
+              )}
+
+            {/* End turn button — only show when it's my turn (or shared mode) */}
+            {(state.currentPhase === "play" || state.currentPhase === "end") &&
+              !(isAIMode && state.currentPlayerIndex === 1) &&
+              (!isPerDevice || isMyTurn) && (
                 <Button
                   size="sm"
                   onClick={handleEndTurn}
@@ -940,50 +1184,52 @@ export default function GameScreen({
                 </Button>
               )}
 
-            {/* Surrender button */}
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="border-red-500/50 text-red-400 hover:bg-red-500/10 text-[10px] h-7"
-                  data-ocid="game.surrender_open_modal_button"
+            {/* Surrender button — only show when it's my turn (or shared mode) */}
+            {(!isPerDevice || isMyTurn) && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-red-500/50 text-red-400 hover:bg-red-500/10 text-[10px] h-7"
+                    data-ocid="game.surrender_open_modal_button"
+                  >
+                    <Flag className="w-3 h-3 mr-0.5" />
+                    Rendirse
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent
+                  className="border-red-500/40 bg-card"
+                  data-ocid="game.surrender_dialog"
                 >
-                  <Flag className="w-3 h-3 mr-0.5" />
-                  Rendirse
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent
-                className="border-red-500/40 bg-card"
-                data-ocid="game.surrender_dialog"
-              >
-                <AlertDialogHeader>
-                  <AlertDialogTitle className="text-foreground">
-                    🏳️ ¿Rendirse?
-                  </AlertDialogTitle>
-                  <AlertDialogDescription>
-                    {currentPlayer.name}, si te rindes todos tus Servidores
-                    quedarán Offline y serás eliminado. Esta acción no se puede
-                    deshacer.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel
-                    className="border-border text-foreground/70"
-                    data-ocid="game.surrender_cancel_button"
-                  >
-                    Cancelar
-                  </AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={handleSurrender}
-                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                    data-ocid="game.surrender_confirm_button"
-                  >
-                    Confirmar Rendición
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle className="text-foreground">
+                      🏳️ ¿Rendirse?
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {bottomZonePlayer.name}, si te rindes todos tus Servidores
+                      quedarán Offline y serás eliminado. Esta acción no se
+                      puede deshacer.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel
+                      className="border-border text-foreground/70"
+                      data-ocid="game.surrender_cancel_button"
+                    >
+                      Cancelar
+                    </AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={handleSurrender}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      data-ocid="game.surrender_confirm_button"
+                    >
+                      Confirmar Rendición
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
           </div>
         </div>
 
@@ -991,9 +1237,23 @@ export default function GameScreen({
         <div className="flex flex-1 gap-2 min-h-0 overflow-hidden">
           {/* ── Player zones ── */}
           <div className="flex flex-col flex-1 gap-2 min-h-0 overflow-hidden">
+            {/* Enemy zone label */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="h-px flex-1 bg-gradient-to-r from-red-500/40 to-transparent" />
+              <span className="text-[9px] text-red-400/70 uppercase tracking-widest font-bold">
+                Zona Rival
+              </span>
+              <div className="h-px flex-1 bg-gradient-to-l from-red-500/40 to-transparent" />
+            </div>
             {/* Opponent zones */}
             <div
               className={`grid gap-2 flex-shrink-0 ${opponentPlayers.length === 1 ? "grid-cols-1" : opponentPlayers.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}
+              style={{
+                background: "oklch(0.1 0.02 25 / 0.4)",
+                borderRadius: 8,
+                padding: "6px",
+                border: "1px solid oklch(0.35 0.12 25 / 0.2)",
+              }}
             >
               {opponentPlayers.map((player) => (
                 <PlayerZone
@@ -1040,14 +1300,15 @@ export default function GameScreen({
                   className="w-[60px] h-[84px] rounded-lg card-defense-border bg-gradient-to-b from-[oklch(0.12_0.04_240)] to-[oklch(0.08_0.02_240)] flex flex-col items-center justify-center cursor-pointer hover:brightness-110 transition-all"
                   data-ocid="game.draw_deck_button"
                   onClick={
-                    state.currentPhase === "draw"
-                      ? () => dispatch({ type: "DRAW_PHASE" })
+                    state.currentPhase === "draw" && (!isPerDevice || isMyTurn)
+                      ? () => syncDispatch({ type: "DRAW_PHASE" })
                       : undefined
                   }
                   onKeyDown={
-                    state.currentPhase === "draw"
+                    state.currentPhase === "draw" && (!isPerDevice || isMyTurn)
                       ? (e) =>
-                          e.key === "Enter" && dispatch({ type: "DRAW_PHASE" })
+                          e.key === "Enter" &&
+                          syncDispatch({ type: "DRAW_PHASE" })
                       : undefined
                   }
                 >
@@ -1106,33 +1367,49 @@ export default function GameScreen({
               </div>
             </div>
 
-            {/* Current player zone */}
-            <div className="flex-1 min-h-0 overflow-hidden">
+            {/* Player zone label */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="h-px flex-1 bg-gradient-to-r from-primary/40 to-transparent" />
+              <span className="text-[9px] text-primary/70 uppercase tracking-widest font-bold">
+                Tu Zona
+              </span>
+              <div className="h-px flex-1 bg-gradient-to-l from-primary/40 to-transparent" />
+            </div>
+            {/* Current player zone (local player in per-device, current player in shared) */}
+            <div
+              className="flex-1 min-h-0 overflow-hidden"
+              style={{
+                background: "oklch(0.1 0.02 145 / 0.3)",
+                borderRadius: 8,
+                padding: "6px",
+                border: "1px solid oklch(0.35 0.15 145 / 0.2)",
+              }}
+            >
               <PlayerZone
-                player={currentPlayer}
-                isCurrentPlayer={true}
+                player={bottomZonePlayer}
+                isCurrentPlayer={isPerDevice ? isMyTurn : true}
                 isUnderAttack={
-                  state.pendingAttack?.targetPlayerId === currentPlayer.id
+                  state.pendingAttack?.targetPlayerId === bottomZonePlayer.id
                 }
-                selectedCardIndex={state.selectedCardIndex}
+                selectedCardIndex={isMyTurn ? state.selectedCardIndex : null}
                 canSelectCards={canPlayCards}
                 isTargetable={false}
                 isSelected={false}
-                onSelectCard={handleSelectCard}
+                onSelectCard={isMyTurn ? handleSelectCard : () => {}}
                 onSelectAsTarget={() => {}}
                 onDefend={handleDefend}
-                onHeroUltimate={handleHeroUltimate}
+                onHeroUltimate={isMyTurn ? handleHeroUltimate : undefined}
                 heroUltimateUsed={heroUltimateUsedByCurrentPlayer}
                 showHeroActivation={
-                  state.heroActionEvent?.playerId === currentPlayer.id
+                  state.heroActionEvent?.playerId === bottomZonePlayer.id
                 }
                 heroActivationMessage={
-                  state.heroActionEvent?.playerId === currentPlayer.id
+                  state.heroActionEvent?.playerId === bottomZonePlayer.id
                     ? state.heroActionEvent.message
                     : undefined
                 }
-                isHit={hitPlayerId === currentPlayer.id}
-                isDefending={defendingPlayerId === currentPlayer.id}
+                isHit={hitPlayerId === bottomZonePlayer.id}
+                isDefending={defendingPlayerId === bottomZonePlayer.id}
                 faceDown={false}
                 cardSize={cardSize}
                 currentPhase={state.currentPhase}
@@ -1152,14 +1429,52 @@ export default function GameScreen({
           onConfirm={handleSaberConfirm}
           onSkip={handleSaberSkip}
         />
-
-        {/* ── Mobile log toggle (bottom sheet) ── */}
-        {state.log.length > 0 && (
-          <div className="md:hidden flex-shrink-0 rounded-lg border border-border bg-card/50 backdrop-blur-sm max-h-20 overflow-hidden">
-            <CombatLog entries={state.log.slice(0, 5)} />
-          </div>
-        )}
       </div>
+
+      {/* ── Action Toast (mobile only — last log entry as transient popup) ── */}
+      <ActionToast entry={state.log[0] ?? null} />
+
+      {/* ── Mobile Log button (bottom-right FAB) ── */}
+      <button
+        type="button"
+        onClick={() => setIsLogSheetOpen(true)}
+        className="md:hidden fixed bottom-4 right-4 z-50 w-11 h-11 rounded-full border border-primary/50 bg-card/90 backdrop-blur-md flex items-center justify-center shadow-lg hover:bg-card transition-colors"
+        style={{ boxShadow: "0 0 15px oklch(0.75 0.25 145 / 0.3)" }}
+        data-ocid="game.log_open_modal_button"
+        aria-label="Ver log de combate"
+      >
+        <List className="w-4 h-4 text-primary" />
+        {state.log.length > 0 && (
+          <span
+            className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[8px] font-bold flex items-center justify-center"
+            style={{
+              background: "oklch(0.75 0.25 145)",
+              color: "oklch(0.08 0.02 240)",
+            }}
+          >
+            {Math.min(state.log.length, 99)}
+          </span>
+        )}
+      </button>
+
+      {/* ── Mobile Log Sheet ── */}
+      <Sheet open={isLogSheetOpen} onOpenChange={setIsLogSheetOpen}>
+        <SheetContent
+          side="bottom"
+          className="h-[70vh] border-t border-primary/40 bg-card/95 backdrop-blur-md"
+          data-ocid="game.log_sheet"
+        >
+          <SheetHeader className="pb-2">
+            <SheetTitle className="text-sm font-bold text-foreground flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              Log de Combate
+            </SheetTitle>
+          </SheetHeader>
+          <ScrollArea className="h-full pb-6">
+            <CombatLog entries={state.log} />
+          </ScrollArea>
+        </SheetContent>
+      </Sheet>
 
       {/* ── Defense Timer Overlay (replaces simple attack pending) ── */}
       {state.pendingAttack &&
@@ -1167,7 +1482,7 @@ export default function GameScreen({
         !showTurnTransition && (
           <DefenseTimerOverlay
             pendingAttack={state.pendingAttack}
-            defenseCards={currentPlayer.hand.filter(
+            defenseCards={bottomZonePlayer.hand.filter(
               (c) => c.type === "defense",
             )}
             onDefend={handleDefend}
@@ -1186,6 +1501,7 @@ export default function GameScreen({
           }
           onDone={handleTurnTransitionDone}
           isAI={isAIMode && state.currentPlayerIndex === 1}
+          isMultiplayerSync={isMultiplayerSync}
         />
       )}
 
