@@ -167,20 +167,15 @@ function drawCards(
 export function executeDrawPhase(state: GameState): GameState {
   const currentPlayer = state.players[state.currentPlayerIndex];
   if (currentPlayer.blockedTurns > 0) {
-    // Player is blocked — skip draw phase but count turns
+    // Player is blocked — skip draw and play phases entirely
+    // Note: blockedTurns is decremented globally at end of turn (executeEndPhase)
     const log = addLog(
       state,
       "system",
-      `⚠️ ${currentPlayer.name} está bloqueado por Ransomware (${currentPlayer.blockedTurns} turno(s) restante(s)).`,
-    );
-    const newPlayers = state.players.map((p) =>
-      p.id === currentPlayer.id
-        ? { ...p, blockedTurns: Math.max(0, p.blockedTurns - 1) }
-        : p,
+      `⚠️ ${currentPlayer.name} está bloqueado (${currentPlayer.blockedTurns} turno(s) restante(s)).`,
     );
     return {
       ...state,
-      players: newPlayers,
       log,
       currentPhase: "end", // skip play phase too
     };
@@ -279,11 +274,18 @@ export function executeEndPhase(state: GameState): GameState {
     newPlayers = newPlayers.map((p) => ({ ...p, puduShieldUsed: false }));
   }
 
-  // Decrement immune turns
+  // Decrement immune turns for ALL players on every end-of-turn
+  // This ensures abilities like Modo Incógnito never last more than 1-2 turns
+  // regardless of player count. Also clear per-turn effects for current player.
   newPlayers = newPlayers.map((p) => {
     const updates: Partial<PlayerState> = {};
+    // Decrement immuneTurns for every player (so immunity ends in max 2 turns in any game)
+    if (p.immuneTurns > 0) updates.immuneTurns = Math.max(0, p.immuneTurns - 1);
+    // Decrement blockedTurns for every player so Ransomware/Spam don't drag on
+    if (p.blockedTurns > 0)
+      updates.blockedTurns = Math.max(0, p.blockedTurns - 1);
+    // Clear per-turn effects only for the player who just ended their turn
     if (p.id === currentPlayer.id) {
-      if (p.immuneTurns > 0) updates.immuneTurns = p.immuneTurns - 1;
       updates.firewallAguaActive = false;
       updates.handRevealed = false;
     }
@@ -966,11 +968,11 @@ export function activateHeroUltimate(
 
   switch (player.heroId) {
     case "pudu": {
-      // Cifrado Total: immune for ~4 turns (2 rounds)
+      // Cifrado Total: immune for 2 turns (now decremented globally each turn-end)
       newPlayers = newPlayers.map((p) =>
-        p.id === playerId ? { ...p, immuneTurns: 4 } : p,
+        p.id === playerId ? { ...p, immuneTurns: 2 } : p,
       );
-      logMsg = `💚 ¡${player.name} activó Cifrado Total! — Inmune por 2 rondas.`;
+      logMsg = `💚 ¡${player.name} activó Cifrado Total! — Inmune por 2 turnos.`;
       actionColor = "#22c55e";
       break;
     }

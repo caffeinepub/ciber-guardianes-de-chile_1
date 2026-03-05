@@ -4,6 +4,7 @@
 import { Toaster } from "@/components/ui/sonner";
 import React, { useState, useCallback, useEffect } from "react";
 import { HEROES } from "./data/heroes";
+import { roomCodeToSeed } from "./game/gameStateSerializer";
 import type { GameState, HeroId } from "./game/gameTypes";
 import { useActor } from "./hooks/useActor";
 import GameOverScreen from "./screens/GameOverScreen";
@@ -158,20 +159,33 @@ export default function App() {
       });
       setScreen("game");
     } else if (localPlayerIndex !== null) {
-      // Multiplayer per-device mode: each device only selects their own hero (step 0)
-      // Fill remaining slots with random available heroes for game engine initialization
+      // Multiplayer per-device mode: each device only selects their own hero.
+      // CRITICAL: Fill remaining slots deterministically using the room code as seed
+      // so that ALL devices produce the EXACT same heroSelections array → identical
+      // initial deck shuffle → synchronized game state from turn 1.
       const localHero = heroSelections[localPlayerIndex];
       const allHeroIds = HEROES.map((h) => h.id as HeroId);
-      const usedHeroes: HeroId[] = localHero ? [localHero] : [];
+      const seed = roomCodeToSeed(multiplayerRoomCode ?? "DEFAULT");
+
       setHeroSelections((prev) => {
         const next = [...prev];
+        // Ensure local player's selection is recorded
+        if (localHero) next[localPlayerIndex] = localHero;
+
+        // Build deterministic fill order: sort hero ids consistently, then pick by seed
+        const sortedHeroIds = [...allHeroIds].sort();
+        const usedHeroes: HeroId[] = next
+          .slice(0, playerCount)
+          .filter(Boolean) as HeroId[];
+
         for (let i = 0; i < playerCount; i++) {
-          if (i === localPlayerIndex) continue;
-          // Assign a random hero not yet used
-          const available = allHeroIds.filter((id) => !usedHeroes.includes(id));
-          const pick =
-            available[Math.floor(Math.random() * available.length)] ??
-            allHeroIds[0];
+          if (next[i] != null) continue;
+          const available = sortedHeroIds.filter(
+            (id) => !usedHeroes.includes(id),
+          );
+          // Deterministic pick: use (seed + i) as offset into available list
+          const deterministicIdx = (seed + i) % available.length;
+          const pick = available[deterministicIdx] ?? available[0];
           next[i] = pick;
           usedHeroes.push(pick);
         }
@@ -183,7 +197,14 @@ export default function App() {
     } else {
       setScreen("game");
     }
-  }, [heroSelectStep, playerCount, isAIMode, heroSelections, localPlayerIndex]);
+  }, [
+    heroSelectStep,
+    playerCount,
+    isAIMode,
+    heroSelections,
+    localPlayerIndex,
+    multiplayerRoomCode,
+  ]);
 
   const handleGameOver = useCallback((gameState: GameState) => {
     setFinalGameState(gameState);

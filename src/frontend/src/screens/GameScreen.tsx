@@ -46,7 +46,11 @@ import {
   resolveAttack,
   surrenderPlayer,
 } from "../game/gameEngine";
-import { makeRng, roomCodeToSeed } from "../game/gameStateSerializer";
+import {
+  decodePlayerName,
+  makeRng,
+  roomCodeToSeed,
+} from "../game/gameStateSerializer";
 import type { CardDefinition, GameState, HeroId } from "../game/gameTypes";
 import { useActor } from "../hooks/useActor";
 import { useGameSync } from "../hooks/useGameSync";
@@ -244,6 +248,10 @@ interface TurnTransitionProps {
   onDone: () => void;
   isAI?: boolean;
   isMultiplayerSync?: boolean;
+  /** In per-device mode: true = this device's player is up next */
+  isLocalPlayerNext?: boolean;
+  /** In per-device mode: true = this device is waiting for another player */
+  isWaitingForOtherPlayer?: boolean;
 }
 
 function TurnTransitionOverlay({
@@ -254,10 +262,25 @@ function TurnTransitionOverlay({
   onDone,
   isAI = false,
   isMultiplayerSync = false,
+  isLocalPlayerNext,
+  isWaitingForOtherPlayer = false,
 }: TurnTransitionProps) {
-  const [countdown, setCountdown] = useState(isAI ? 1 : 3);
+  // In per-device mode when it's the OTHER player's turn: auto-dismiss fast (1.5s)
+  // When it's MY turn (or AI): auto-dismiss slower, waiting for tap
+  const autoDelay = isWaitingForOtherPlayer ? 1500 : isAI ? 1000 : 0;
+  const [countdown, setCountdown] = useState(
+    isAI ? 1 : isWaitingForOtherPlayer ? 0 : 3,
+  );
+
+  // Auto-dismiss when waiting for another device
+  useEffect(() => {
+    if (!isWaitingForOtherPlayer) return;
+    const t = setTimeout(onDone, autoDelay);
+    return () => clearTimeout(t);
+  }, [isWaitingForOtherPlayer, autoDelay, onDone]);
 
   useEffect(() => {
+    if (isWaitingForOtherPlayer) return; // handled by auto-dismiss above
     if (countdown <= 0) {
       onDone();
       return;
@@ -265,7 +288,7 @@ function TurnTransitionOverlay({
     const delay = isAI ? 400 : 800;
     const t = setTimeout(() => setCountdown((c) => c - 1), delay);
     return () => clearTimeout(t);
-  }, [countdown, onDone, isAI]);
+  }, [countdown, onDone, isAI, isWaitingForOtherPlayer]);
 
   return (
     <div
@@ -330,7 +353,7 @@ function TurnTransitionOverlay({
         })}
       </div>
 
-      <div className="relative z-10 flex flex-col items-center gap-4 text-center px-6">
+      <div className="relative z-10 flex flex-col items-center gap-3 md:gap-4 text-center px-4 md:px-6">
         {/* TURNO DE label */}
         <p
           className="text-[10px] font-bold uppercase tracking-[0.5em] text-muted-foreground turn-slide-in"
@@ -339,9 +362,9 @@ function TurnTransitionOverlay({
           TURNO DE
         </p>
 
-        {/* Hero avatar — larger */}
+        {/* Hero avatar */}
         <div
-          className="w-32 h-32 rounded-full overflow-hidden turn-slide-in"
+          className="w-20 h-20 md:w-32 md:h-32 rounded-full overflow-hidden turn-slide-in"
           style={{
             border: `3px solid ${heroColor}`,
             boxShadow: `0 0 30px ${heroColor} / 0.6, 0 0 60px ${heroColor} / 0.3`,
@@ -358,7 +381,7 @@ function TurnTransitionOverlay({
         {/* Player name with glitch */}
         <div className="turn-slide-in" style={{ animationDelay: "0.18s" }}>
           <h2
-            className="text-4xl md:text-6xl font-black font-display glitch-text"
+            className="text-2xl md:text-5xl font-black font-display glitch-text"
             style={{
               letterSpacing: "-0.02em",
               color: heroColor,
@@ -367,12 +390,12 @@ function TurnTransitionOverlay({
           >
             {nextPlayerName}
           </h2>
-          <p className="text-sm text-muted-foreground mt-1">
+          <p className="text-xs md:text-sm text-muted-foreground mt-1">
             {nextPlayerHeroName}
           </p>
         </div>
 
-        {/* PASA EL DISPOSITIVO / AI label */}
+        {/* PASA EL DISPOSITIVO / AI / per-device label */}
         <div className="turn-slide-in" style={{ animationDelay: "0.25s" }}>
           <div
             className="px-4 py-2 rounded-xl text-sm font-black uppercase tracking-[0.25em]"
@@ -386,49 +409,60 @@ function TurnTransitionOverlay({
             {isAI
               ? "🤖 TURNO DE LA IA"
               : isMultiplayerSync
-                ? "⏳ TURNO DEL OTRO JUGADOR"
+                ? isLocalPlayerNext
+                  ? "⚡ ¡ES TU TURNO! — Toca para empezar"
+                  : isWaitingForOtherPlayer
+                    ? `⏳ Turno de ${nextPlayerName}...`
+                    : `⏳ Esperando a ${nextPlayerName}...`
                 : "📲 PASA EL DISPOSITIVO"}
           </div>
         </div>
 
-        {/* Countdown */}
-        <div
-          className="flex items-center gap-3 mt-1 turn-slide-in"
-          style={{ animationDelay: "0.3s" }}
-        >
-          {[3, 2, 1].map((n) => (
-            <div
-              key={n}
-              className="w-10 h-10 rounded-full border-2 flex items-center justify-center font-bold text-lg transition-all duration-300"
-              style={{
-                borderColor:
-                  countdown <= n ? heroColor : "oklch(0.25 0.03 240)",
-                color: countdown <= n ? heroColor : "oklch(0.35 0.03 240)",
-                boxShadow:
-                  countdown <= n ? `0 0 12px ${heroColor} / 0.5` : "none",
-                background:
-                  countdown <= n
-                    ? `${heroColor.replace("oklch(", "oklch(").replace(")", " / 0.1)")}`
-                    : "transparent",
-              }}
-            >
-              {n}
-            </div>
-          ))}
-        </div>
+        {/* Countdown — only shown when tapping is needed (not when waiting for other) */}
+        {!isWaitingForOtherPlayer && (
+          <div
+            className="flex items-center gap-3 mt-1 turn-slide-in"
+            style={{ animationDelay: "0.3s" }}
+          >
+            {[3, 2, 1].map((n) => (
+              <div
+                key={n}
+                className="w-10 h-10 rounded-full border-2 flex items-center justify-center font-bold text-lg transition-all duration-300"
+                style={{
+                  borderColor:
+                    countdown <= n ? heroColor : "oklch(0.25 0.03 240)",
+                  color: countdown <= n ? heroColor : "oklch(0.35 0.03 240)",
+                  boxShadow:
+                    countdown <= n ? `0 0 12px ${heroColor} / 0.5` : "none",
+                  background:
+                    countdown <= n
+                      ? `${heroColor.replace("oklch(", "oklch(").replace(")", " / 0.1)")}`
+                      : "transparent",
+                }}
+              >
+                {n}
+              </div>
+            ))}
+          </div>
+        )}
 
-        <Button
-          onClick={onDone}
-          size="sm"
-          className="mt-2 font-bold animate-pulse"
-          style={{
-            background: heroColor,
-            color: "oklch(0.08 0.02 240)",
-          }}
-          data-ocid="game.turn_transition_continue_button"
-        >
-          Toca para continuar
-        </Button>
+        {/* Show tap-to-continue only when it's this device's turn or shared/AI mode */}
+        {!isWaitingForOtherPlayer && (
+          <Button
+            onClick={onDone}
+            size="sm"
+            className="mt-2 font-bold animate-pulse"
+            style={{
+              background: heroColor,
+              color: "oklch(0.08 0.02 240)",
+            }}
+            data-ocid="game.turn_transition_continue_button"
+          >
+            {isLocalPlayerNext
+              ? "⚡ ¡Empezar mi turno!"
+              : "Toca para continuar"}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -620,7 +654,15 @@ export default function GameScreen({
     heroImage: string;
     heroName: string;
     heroId: string;
+    isLocalPlayerTurn: boolean;
+    isWaitingForOther: boolean;
   } | null>(null);
+
+  // ── Player display names (synced from canister room in multiplayer) ─────────
+  // Maps playerIndex → display name so opponent names are shown correctly
+  const [playerDisplayNames, setPlayerDisplayNames] = useState<
+    Record<number, string>
+  >({});
 
   // Track hit/defend animations per player
   const [hitPlayerId, setHitPlayerId] = useState<number | null>(null);
@@ -701,9 +743,22 @@ export default function GameScreen({
     : true;
 
   // Am I the target of a pending attack? (for per-device mode)
+  // Check both player.id and player index as fallback for robustness
   const isMyDefenseTurn = isPerDevice
-    ? state.pendingAttack?.targetPlayerId === localPlayer.id
+    ? state.pendingAttack?.targetPlayerId === localPlayer.id ||
+      state.pendingAttack?.targetPlayerId === safeLocalIndex
     : true;
+
+  // ── Dismiss turn-transition overlay immediately if a pending attack arrives ──
+  // When remote opponent's attack action is received, the defender's device
+  // might still be showing the transition overlay — clear it so defense can show.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — only trigger on pendingAttack changes
+  useEffect(() => {
+    if (state.pendingAttack && isMyDefenseTurn && showTurnTransition) {
+      setShowTurnTransition(false);
+      setTransitionData(null);
+    }
+  }, [state.pendingAttack, isMyDefenseTurn]);
 
   // Detect server damage → hero-hit animation
   useEffect(() => {
@@ -747,16 +802,34 @@ export default function GameScreen({
     ) {
       const nextPlayer = state.players[state.currentPlayerIndex];
       const nextHero = getHeroById(nextPlayer.heroId);
+      // Use synced display name from canister if available (multiplayer), else fallback to state name
+      const resolvedName =
+        playerDisplayNames[state.currentPlayerIndex] ?? nextPlayer.name;
+      // In per-device mode: determine if the next turn belongs to THIS device or another
+      const isLocalPlayerTurn = isPerDevice
+        ? state.currentPlayerIndex === safeLocalIndex
+        : false;
+      // In per-device multiplayer: if it's NOT this device's turn, auto-dismiss the overlay
+      const isWaitingForOther = isPerDevice && !isLocalPlayerTurn;
       setTransitionData({
-        name: nextPlayer.name,
+        name: resolvedName,
         heroImage: nextHero?.image ?? "",
         heroName: nextHero?.name ?? "",
         heroId: nextPlayer.heroId,
+        isLocalPlayerTurn,
+        isWaitingForOther,
       });
       setShowTurnTransition(true);
       prevPlayerIndexRef.current = state.currentPlayerIndex;
     }
-  }, [state.currentPlayerIndex, state.screen, state.players]);
+  }, [
+    state.currentPlayerIndex,
+    state.screen,
+    state.players,
+    playerDisplayNames,
+    isPerDevice,
+    safeLocalIndex,
+  ]);
 
   // Forward game over
   React.useEffect(() => {
@@ -794,6 +867,37 @@ export default function GameScreen({
       return () => clearTimeout(t);
     }
   }, [state.heroActionEvent]);
+
+  // ── Sync opponent player names from canister room ────────────────────────
+  // Polls every 2s in multiplayer mode to pick up opponent display names
+  useEffect(() => {
+    if (!isMultiplayerSync || !actor || !roomCode) return;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        // biome-ignore lint/suspicious/noExplicitAny: actor type is dynamic
+        const room = await (actor as any).getRoomState(roomCode);
+        if (!room || cancelled) return;
+        const names: Record<number, string> = {};
+        for (let i = 0; i < room.players.length; i++) {
+          const rp = room.players[i];
+          const { name } = decodePlayerName(rp.name as string);
+          if (name) names[i] = name;
+        }
+        if (!cancelled) setPlayerDisplayNames(names);
+      } catch {
+        // ignore poll errors
+      }
+    };
+
+    void poll();
+    const interval = setInterval(poll, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isMultiplayerSync, actor, roomCode]);
 
   // ── Multiplayer action dispatcher ─────────────────────────────────────────
   // Wraps dispatch to also publish to canister for cross-device sync
@@ -1028,6 +1132,15 @@ export default function GameScreen({
     (p) => p.id !== bottomZonePlayer.id,
   );
 
+  // Helper: get best display name for a player index (synced name > state name)
+  const getDisplayName = (playerIdx: number): string => {
+    return (
+      playerDisplayNames[playerIdx] ??
+      state.players[playerIdx]?.name ??
+      `Jugador ${playerIdx + 1}`
+    );
+  };
+
   // Can play cards: only when it's my turn (per-device) or always in shared mode
   const canPlayCards =
     state.currentPhase === "play" &&
@@ -1051,17 +1164,17 @@ export default function GameScreen({
 
   const roundProgress = Math.min((state.round / state.maxRounds) * 100, 100);
 
-  // Determine which player is the defender (target of pending attack)
-  const defenderPlayer = state.pendingAttack
-    ? state.players.find((p) => p.id === state.pendingAttack?.targetPlayerId)
-    : null;
-  // In per-device mode: only show defense overlay to the targeted device
+  // In per-device mode: only show defense overlay to the targeted device.
+  // In shared-screen mode: always show it (the attacked player's turn happens on same device).
+  // In AI mode: only show it when the human player (index 0) is under attack.
   const defenderIsCurrentPlayer = isPerDevice
     ? isMyDefenseTurn
-    : defenderPlayer?.id === currentPlayer.id;
+    : isAIMode
+      ? state.pendingAttack?.targetPlayerId === 0
+      : true;
 
   return (
-    <div className="relative min-h-screen bg-background flex flex-col p-2 gap-2 max-h-screen overflow-hidden">
+    <div className="relative min-h-screen bg-background flex flex-col p-2 gap-1.5 md:gap-2 md:max-h-screen md:overflow-hidden overflow-y-auto">
       {/* Battle background */}
       <img
         src="/assets/generated/battle-arena-bg.dim_1920x1080.jpg"
@@ -1075,13 +1188,13 @@ export default function GameScreen({
       <div className="absolute inset-0 circuit-bg pointer-events-none z-0" />
 
       {/* All content above bg */}
-      <div className="relative z-10 flex flex-col flex-1 gap-2 min-h-0 overflow-hidden">
+      <div className="relative z-10 flex flex-col flex-1 gap-1.5 md:gap-2 min-h-0 md:overflow-hidden">
         {/* ── Top bar ── */}
-        <div className="flex items-center justify-between rounded-lg border border-border bg-card/70 backdrop-blur-sm px-3 py-1.5 flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <Cpu className="w-4 h-4 text-primary" />
-            <div>
-              <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between rounded-lg border border-border bg-card/70 backdrop-blur-sm px-2 md:px-3 py-1.5 flex-shrink-0 gap-1">
+          <div className="flex items-center gap-1.5 md:gap-3 min-w-0">
+            <Cpu className="w-4 h-4 text-primary flex-shrink-0" />
+            <div className="min-w-0">
+              <div className="hidden sm:flex items-center gap-2">
                 <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
                   T{state.turn} · Ronda{" "}
                   <span className="text-primary font-bold">{state.round}</span>/
@@ -1095,9 +1208,9 @@ export default function GameScreen({
                   />
                 </div>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1">
                 <div
-                  className={`w-1.5 h-1.5 rounded-full ${
+                  className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
                     state.currentPhase === "draw"
                       ? "bg-yellow-400 animate-pulse"
                       : state.currentPhase === "play"
@@ -1105,57 +1218,59 @@ export default function GameScreen({
                         : "bg-muted-foreground"
                   }`}
                 />
-                <span className="text-xs font-bold text-foreground">
+                <span className="text-[11px] font-bold text-foreground truncate max-w-[100px] md:max-w-none">
                   {isPerDevice
-                    ? `${localPlayer.name} · ${localHero?.name.split('"')[1] ?? ""}`
-                    : `${currentPlayer.name}${currentHero ? ` · ${currentHero.name.split('"')[1] ?? ""}` : ""}`}
+                    ? `${getDisplayName(safeLocalIndex)} · ${localHero?.name.split('"')[1] ?? ""}`
+                    : `${getDisplayName(state.currentPlayerIndex)}${currentHero ? ` · ${currentHero.name.split('"')[1] ?? ""}` : ""}`}
                 </span>
-                <span className="text-[10px] text-muted-foreground">
+                <span className="hidden sm:inline text-[10px] text-muted-foreground">
                   {isPerDevice
                     ? isMyTurn
                       ? state.currentPhase === "draw"
                         ? "Tu turno — Conexión"
                         : state.currentPhase === "play"
-                          ? `Tu turno — Ejecución (${cardsPlayedThisTurn}/${GAME_CONSTANTS.CARDS_PER_TURN})`
-                          : "Tu turno — Sincronización"
-                      : `Turno de ${currentPlayer.name}`
+                          ? `Ejecución (${cardsPlayedThisTurn}/${GAME_CONSTANTS.CARDS_PER_TURN})`
+                          : "Sincronización"
+                      : `Turno de ${getDisplayName(state.currentPlayerIndex)}`
                     : state.currentPhase === "draw"
-                      ? "Fase: Conexión"
+                      ? "Conexión"
                       : state.currentPhase === "play"
-                        ? `Fase: Ejecución (${cardsPlayedThisTurn}/${GAME_CONSTANTS.CARDS_PER_TURN})`
-                        : "Fase: Sincronización"}
+                        ? `Ejecución (${cardsPlayedThisTurn}/${GAME_CONSTANTS.CARDS_PER_TURN})`
+                        : "Sincronización"}
                 </span>
               </div>
             </div>
           </div>
 
           {/* Action buttons */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
             {/* AI thinking indicator */}
             {isAIMode && isAIThinking && state.currentPlayerIndex === 1 && (
-              <div className="flex items-center gap-1.5 text-[10px] text-purple-400 bg-purple-500/10 border border-purple-500/30 rounded-lg px-2 py-1 animate-pulse">
+              <div className="flex items-center gap-1 text-[10px] text-purple-400 bg-purple-500/10 border border-purple-500/30 rounded-lg px-1.5 py-0.5 animate-pulse">
                 <span>🤖</span>
-                <span>IA pensando...</span>
+                <span className="hidden sm:inline">IA pensando...</span>
               </div>
             )}
 
             {/* Per-device: waiting message when not my turn */}
             {isPerDevice && !isMyTurn && !showTurnTransition && (
-              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground bg-muted/20 border border-border rounded-lg px-2 py-1">
+              <div className="flex items-center gap-1 text-[10px] text-muted-foreground bg-muted/20 border border-border rounded-lg px-1.5 py-0.5">
                 <span className="animate-pulse">⏳</span>
-                <span>Turno de {currentPlayer.name}</span>
+                <span className="hidden sm:inline">
+                  Turno de {getDisplayName(state.currentPlayerIndex)}
+                </span>
               </div>
             )}
 
             {/* Syncing indicator for multiplayer */}
             {isMultiplayerSync && isSyncing && (
-              <div className="flex items-center gap-1.5 text-[10px] text-cyan-400 bg-cyan-500/10 border border-cyan-500/30 rounded-lg px-2 py-1 animate-pulse">
+              <div className="flex items-center gap-1 text-[10px] text-cyan-400 bg-cyan-500/10 border border-cyan-500/30 rounded-lg px-1.5 py-0.5 animate-pulse">
                 <span>🔄</span>
-                <span>Sincronizando...</span>
+                <span className="hidden sm:inline">Sincronizando...</span>
               </div>
             )}
 
-            {/* Draw button — only show when it's my turn (or shared mode) */}
+            {/* Draw button — only show when it's my turn (or shared mode). Hidden on mobile (shown in sticky bar below) */}
             {state.currentPhase === "draw" &&
               !showTurnTransition &&
               (!isPerDevice || isMyTurn) &&
@@ -1163,39 +1278,39 @@ export default function GameScreen({
                 <Button
                   size="sm"
                   onClick={() => syncDispatch({ type: "DRAW_PHASE" })}
-                  className="bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 hover:bg-yellow-500/30 text-[10px] h-7"
+                  className="hidden sm:flex bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 hover:bg-yellow-500/30 text-[10px] h-7"
                   data-ocid="game.draw_deck_button"
                 >
                   📡 Robar Carta
                 </Button>
               )}
 
-            {/* End turn button — only show when it's my turn (or shared mode) */}
+            {/* End turn button — hidden on mobile (shown in sticky bar below) */}
             {(state.currentPhase === "play" || state.currentPhase === "end") &&
               !(isAIMode && state.currentPlayerIndex === 1) &&
               (!isPerDevice || isMyTurn) && (
                 <Button
                   size="sm"
                   onClick={handleEndTurn}
-                  className="bg-primary/20 text-primary border border-primary/50 hover:bg-primary/30 text-[10px] h-7"
+                  className="hidden sm:flex bg-primary/20 text-primary border border-primary/50 hover:bg-primary/30 text-[10px] h-7"
                   data-ocid="game.end_turn_button"
                 >
-                  Fin del Turno <ChevronRight className="w-3 h-3 ml-0.5" />
+                  Fin <ChevronRight className="w-3 h-3 ml-0.5" />
                 </Button>
               )}
 
-            {/* Surrender button — only show when it's my turn (or shared mode) */}
+            {/* Surrender button — icon-only on mobile */}
             {(!isPerDevice || isMyTurn) && (
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button
                     size="sm"
                     variant="outline"
-                    className="border-red-500/50 text-red-400 hover:bg-red-500/10 text-[10px] h-7"
+                    className="border-red-500/50 text-red-400 hover:bg-red-500/10 text-[10px] h-7 px-1.5"
                     data-ocid="game.surrender_open_modal_button"
                   >
-                    <Flag className="w-3 h-3 mr-0.5" />
-                    Rendirse
+                    <Flag className="w-3 h-3" />
+                    <span className="hidden sm:inline ml-0.5">Rendirse</span>
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent
@@ -1207,9 +1322,9 @@ export default function GameScreen({
                       🏳️ ¿Rendirse?
                     </AlertDialogTitle>
                     <AlertDialogDescription>
-                      {bottomZonePlayer.name}, si te rindes todos tus Servidores
-                      quedarán Offline y serás eliminado. Esta acción no se
-                      puede deshacer.
+                      {getDisplayName(safeLocalIndex)}, si te rindes todos tus
+                      Servidores quedarán Offline y serás eliminado. Esta acción
+                      no se puede deshacer.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
@@ -1234,9 +1349,9 @@ export default function GameScreen({
         </div>
 
         {/* ── Main game area ── */}
-        <div className="flex flex-1 gap-2 min-h-0 overflow-hidden">
+        <div className="flex flex-1 gap-2 min-h-0 md:overflow-hidden">
           {/* ── Player zones ── */}
-          <div className="flex flex-col flex-1 gap-2 min-h-0 overflow-hidden">
+          <div className="flex flex-col flex-1 gap-1.5 md:gap-2 min-h-0 md:overflow-hidden">
             {/* Enemy zone label */}
             <div className="flex items-center gap-2 flex-shrink-0">
               <div className="h-px flex-1 bg-gradient-to-r from-red-500/40 to-transparent" />
@@ -1247,7 +1362,7 @@ export default function GameScreen({
             </div>
             {/* Opponent zones */}
             <div
-              className={`grid gap-2 flex-shrink-0 ${opponentPlayers.length === 1 ? "grid-cols-1" : opponentPlayers.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}
+              className={`grid gap-1.5 md:gap-2 flex-shrink-0 max-h-[32vh] md:max-h-none overflow-y-auto md:overflow-visible ${opponentPlayers.length === 1 ? "grid-cols-1" : opponentPlayers.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}
               style={{
                 background: "oklch(0.1 0.02 25 / 0.4)",
                 borderRadius: 8,
@@ -1255,43 +1370,55 @@ export default function GameScreen({
                 border: "1px solid oklch(0.35 0.12 25 / 0.2)",
               }}
             >
-              {opponentPlayers.map((player) => (
-                <PlayerZone
-                  key={player.id}
-                  player={player}
-                  isCurrentPlayer={false}
-                  isUnderAttack={
-                    state.pendingAttack?.targetPlayerId === player.id
-                  }
-                  selectedCardIndex={null}
-                  canSelectCards={false}
-                  isTargetable={
-                    (isSelectingTarget || isSelectingActionTarget) &&
-                    player.isOnline &&
-                    player.id !== currentPlayer.id
-                  }
-                  isSelected={state.selectedTargetId === player.id}
-                  onSelectCard={() => {}}
-                  onSelectAsTarget={() => handleSelectTarget(player.id)}
-                  onDefend={handleDefend}
-                  faceDown={true}
-                  cardSize={cardSize}
-                  showHeroActivation={
-                    state.heroActionEvent?.playerId === player.id
-                  }
-                  heroActivationMessage={
-                    state.heroActionEvent?.playerId === player.id
-                      ? state.heroActionEvent.message
-                      : undefined
-                  }
-                  isHit={hitPlayerId === player.id}
-                  isDefending={defendingPlayerId === player.id}
-                />
-              ))}
+              {opponentPlayers.map((player) => {
+                // Find the actual index of this opponent in the players array for name lookup
+                const playerStateIdx = state.players.findIndex(
+                  (p) => p.id === player.id,
+                );
+                const resolvedOpponentName =
+                  playerDisplayNames[playerStateIdx] ?? player.name;
+                const playerWithResolvedName =
+                  resolvedOpponentName !== player.name
+                    ? { ...player, name: resolvedOpponentName }
+                    : player;
+                return (
+                  <PlayerZone
+                    key={player.id}
+                    player={playerWithResolvedName}
+                    isCurrentPlayer={false}
+                    isUnderAttack={
+                      state.pendingAttack?.targetPlayerId === player.id
+                    }
+                    selectedCardIndex={null}
+                    canSelectCards={false}
+                    isTargetable={
+                      (isSelectingTarget || isSelectingActionTarget) &&
+                      player.isOnline &&
+                      player.id !== currentPlayer.id
+                    }
+                    isSelected={state.selectedTargetId === player.id}
+                    onSelectCard={() => {}}
+                    onSelectAsTarget={() => handleSelectTarget(player.id)}
+                    onDefend={handleDefend}
+                    faceDown={true}
+                    cardSize={cardSize}
+                    showHeroActivation={
+                      state.heroActionEvent?.playerId === player.id
+                    }
+                    heroActivationMessage={
+                      state.heroActionEvent?.playerId === player.id
+                        ? state.heroActionEvent.message
+                        : undefined
+                    }
+                    isHit={hitPlayerId === player.id}
+                    isDefending={defendingPlayerId === player.id}
+                  />
+                );
+              })}
             </div>
 
             {/* Center: deck + discard */}
-            <div className="flex items-center justify-center gap-4 flex-shrink-0">
+            <div className="flex items-center justify-center gap-2 md:gap-4 flex-shrink-0">
               {/* Deck */}
               <div className="flex flex-col items-center gap-0.5">
                 <div
@@ -1377,7 +1504,7 @@ export default function GameScreen({
             </div>
             {/* Current player zone (local player in per-device, current player in shared) */}
             <div
-              className="flex-1 min-h-0 overflow-hidden"
+              className="flex-1 min-h-0 md:overflow-hidden"
               style={{
                 background: "oklch(0.1 0.02 145 / 0.3)",
                 borderRadius: 8,
@@ -1386,7 +1513,14 @@ export default function GameScreen({
               }}
             >
               <PlayerZone
-                player={bottomZonePlayer}
+                player={
+                  isPerDevice && playerDisplayNames[safeLocalIndex]
+                    ? {
+                        ...bottomZonePlayer,
+                        name: playerDisplayNames[safeLocalIndex],
+                      }
+                    : bottomZonePlayer
+                }
                 isCurrentPlayer={isPerDevice ? isMyTurn : true}
                 isUnderAttack={
                   state.pendingAttack?.targetPlayerId === bottomZonePlayer.id
@@ -1423,9 +1557,11 @@ export default function GameScreen({
           </div>
         </div>
 
-        {/* ── Regla del Saber popup ── */}
+        {/* ── Regla del Saber popup — only show when not pending an attack ── */}
         <DictionaryModal
-          card={state.saberCard}
+          card={
+            state.saberCard && !state.pendingAttack ? state.saberCard : null
+          }
           onConfirm={handleSaberConfirm}
           onSkip={handleSaberSkip}
         />
@@ -1433,6 +1569,70 @@ export default function GameScreen({
 
       {/* ── Action Toast (mobile only — last log entry as transient popup) ── */}
       <ActionToast entry={state.log[0] ?? null} />
+
+      {/* ── Mobile sticky bottom action bar ── */}
+      {!showTurnTransition && !state.pendingAttack && (
+        <div className="sm:hidden fixed bottom-16 left-0 right-0 z-30 px-3 pb-1">
+          {/* Per-device waiting indicator: show when it's not my turn */}
+          {isPerDevice &&
+            !isMyTurn &&
+            !(isAIMode && state.currentPlayerIndex === 1) && (
+              <div
+                className="w-full h-11 rounded-xl flex items-center justify-center gap-2 border"
+                style={{
+                  background: "oklch(0.1 0.02 240 / 0.85)",
+                  borderColor: "oklch(0.3 0.03 240 / 0.4)",
+                  backdropFilter: "blur(8px)",
+                  color: "oklch(0.55 0.04 240)",
+                }}
+              >
+                <span className="animate-pulse text-sm">⏳</span>
+                <span className="text-xs font-semibold">
+                  Turno de {getDisplayName(state.currentPlayerIndex)} —
+                  espera...
+                </span>
+              </div>
+            )}
+          {/* Draw button — only when it's my turn */}
+          {state.currentPhase === "draw" &&
+            (!isPerDevice || isMyTurn) &&
+            !(isAIMode && state.currentPlayerIndex === 1) && (
+              <button
+                type="button"
+                onClick={() => syncDispatch({ type: "DRAW_PHASE" })}
+                className="w-full h-11 rounded-xl font-bold text-sm flex items-center justify-center gap-2"
+                style={{
+                  background: "oklch(0.85 0.22 85 / 0.85)",
+                  color: "oklch(0.08 0.02 240)",
+                  backdropFilter: "blur(8px)",
+                  boxShadow: "0 0 20px oklch(0.85 0.22 85 / 0.4)",
+                }}
+                data-ocid="game.mobile_draw_button"
+              >
+                📡 Robar Carta
+              </button>
+            )}
+          {/* End turn button — only when it's my turn */}
+          {(state.currentPhase === "play" || state.currentPhase === "end") &&
+            (!isPerDevice || isMyTurn) &&
+            !(isAIMode && state.currentPlayerIndex === 1) && (
+              <button
+                type="button"
+                onClick={handleEndTurn}
+                className="w-full h-11 rounded-xl font-bold text-sm flex items-center justify-center gap-2"
+                style={{
+                  background: "oklch(0.75 0.25 145 / 0.85)",
+                  color: "oklch(0.08 0.02 240)",
+                  backdropFilter: "blur(8px)",
+                  boxShadow: "0 0 20px oklch(0.75 0.25 145 / 0.4)",
+                }}
+                data-ocid="game.mobile_end_turn_button"
+              >
+                Fin del Turno →
+              </button>
+            )}
+        </div>
+      )}
 
       {/* ── Mobile Log button (bottom-right FAB) ── */}
       <button
@@ -1502,6 +1702,8 @@ export default function GameScreen({
           onDone={handleTurnTransitionDone}
           isAI={isAIMode && state.currentPlayerIndex === 1}
           isMultiplayerSync={isMultiplayerSync}
+          isLocalPlayerNext={transitionData.isLocalPlayerTurn}
+          isWaitingForOtherPlayer={transitionData.isWaitingForOther}
         />
       )}
 

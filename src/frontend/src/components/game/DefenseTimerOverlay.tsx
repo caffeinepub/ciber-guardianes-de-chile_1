@@ -69,9 +69,9 @@ export default function DefenseTimerOverlay({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center overflow-y-auto"
       style={{
-        background: "oklch(0.05 0.04 240 / 0.92)",
+        background: "oklch(0.05 0.04 240 / 0.95)",
         backdropFilter: "blur(12px)",
       }}
       data-ocid="game.defense_timer_overlay"
@@ -88,7 +88,7 @@ export default function DefenseTimerOverlay({
         />
       )}
 
-      <div className="relative z-10 flex flex-col items-center gap-5 px-4 max-w-xs w-full">
+      <div className="relative z-10 flex flex-col items-center gap-3 md:gap-5 px-3 py-4 w-full max-w-xs">
         {/* Attack info */}
         <div className="text-center">
           <p
@@ -97,23 +97,22 @@ export default function DefenseTimerOverlay({
           >
             ⚔️ ¡ATAQUE ENTRANTE!
           </p>
-          <h3 className="text-lg font-black font-display text-foreground">
+          <h3 className="text-base md:text-lg font-black font-display text-foreground">
             {pendingAttack.card.name}
           </h3>
-          <p className="text-xs text-muted-foreground mt-0.5">
+          <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">
             {pendingAttack.card.description}
           </p>
         </div>
 
-        {/* Circular timer */}
+        {/* Circular timer — smaller on mobile */}
         <div
-          className="relative flex items-center justify-center"
-          style={{ width: 110, height: 110 }}
+          className="relative flex items-center justify-center flex-shrink-0"
+          style={{ width: 90, height: 90 }}
         >
-          {/* Background circle */}
           <svg
-            width="110"
-            height="110"
+            width="90"
+            height="90"
             viewBox="0 0 110 110"
             aria-hidden="true"
             style={{
@@ -151,7 +150,7 @@ export default function DefenseTimerOverlay({
           {/* Number */}
           <div className="flex flex-col items-center">
             <span
-              className="text-4xl font-black font-mono leading-none"
+              className="text-3xl font-black font-mono leading-none"
               style={{
                 color: textColor,
                 textShadow: `0 0 15px ${textColor}`,
@@ -164,37 +163,37 @@ export default function DefenseTimerOverlay({
             >
               {timeLeft}
             </span>
-            <span className="text-[9px] text-muted-foreground uppercase tracking-widest mt-0.5">
+            <span className="text-[8px] text-muted-foreground uppercase tracking-widest">
               seg.
             </span>
           </div>
         </div>
 
-        {/* Defense cards */}
+        {/* Defense cards — scrollable row on mobile */}
         {defenseCards.length > 0 ? (
           <div className="w-full">
-            <p className="text-[10px] text-muted-foreground text-center uppercase tracking-widest mb-2">
+            <p className="text-[10px] text-muted-foreground text-center uppercase tracking-widest mb-1.5">
               Selecciona una defensa
             </p>
-            <div className="flex gap-2 overflow-x-auto pb-1 justify-center flex-wrap">
+            <div className="flex gap-2 overflow-x-auto pb-1 justify-start md:justify-center px-1">
               {defenseCards.map((card) => (
                 <button
                   key={card.id}
                   type="button"
                   onClick={() => onDefend(card)}
-                  className="flex-shrink-0 flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition-all hover:scale-105 active:scale-95"
+                  className="flex-shrink-0 flex flex-col items-center gap-1 p-1.5 rounded-xl border-2 transition-all hover:scale-105 active:scale-95"
                   style={{
                     borderColor: "oklch(0.7 0.22 230)",
                     background: "oklch(0.14 0.06 230 / 0.8)",
                     boxShadow: "0 0 12px oklch(0.7 0.22 230 / 0.4)",
-                    minWidth: 70,
-                    maxWidth: 90,
+                    minWidth: 60,
+                    maxWidth: 80,
                   }}
                   data-ocid={`game.defense_card_button.${card.id}`}
                 >
                   <div
                     className="rounded overflow-hidden"
-                    style={{ width: 48, height: 64 }}
+                    style={{ width: 44, height: 58 }}
                   >
                     <img
                       src={card.image}
