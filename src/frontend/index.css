@@ -1,0 +1,471 @@
+/* ─── Fonts ─────────────────────────────────────────────── */
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url("/assets/fonts/BricolageGrotesque-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Sora";
+  src: url("/assets/fonts/Sora-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --radius: 0.5rem;
+
+    /* ── Dark cyberpunk palette ── */
+    --background: 0.08 0.02 240;
+    --foreground: 0.95 0.01 240;
+    --card: 0.12 0.03 240;
+    --card-foreground: 0.95 0.01 240;
+    --popover: 0.1 0.025 240;
+    --popover-foreground: 0.95 0.01 240;
+
+    /* Primary = neon green */
+    --primary: 0.75 0.25 145;
+    --primary-foreground: 0.08 0.02 240;
+
+    /* Secondary = dark navy */
+    --secondary: 0.18 0.04 240;
+    --secondary-foreground: 0.95 0.01 240;
+
+    --muted: 0.15 0.03 240;
+    --muted-foreground: 0.55 0.05 240;
+
+    --accent: 0.2 0.04 240;
+    --accent-foreground: 0.95 0.01 240;
+
+    --destructive: 0.6 0.25 25;
+    --destructive-foreground: 0.95 0.01 240;
+
+    --border: 0.2 0.03 240;
+    --input: 0.18 0.03 240;
+    --ring: 0.75 0.25 145;
+
+    --chart-1: 0.75 0.25 145;
+    --chart-2: 0.65 0.2 230;
+    --chart-3: 0.82 0.2 85;
+    --chart-4: 0.6 0.25 25;
+    --chart-5: 0.7 0.18 290;
+
+    --sidebar: 0.1 0.025 240;
+    --sidebar-foreground: 0.95 0.01 240;
+    --sidebar-primary: 0.75 0.25 145;
+    --sidebar-primary-foreground: 0.08 0.02 240;
+    --sidebar-accent: 0.18 0.04 240;
+    --sidebar-accent-foreground: 0.95 0.01 240;
+    --sidebar-border: 0.2 0.03 240;
+    --sidebar-ring: 0.75 0.25 145;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Sora", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: "Bricolage Grotesque", sans-serif;
+  }
+}
+
+/* ─── Game Keyframes (New) ───────────────────────────────── */
+
+@keyframes hero-hit {
+  0% { transform: scale(1) rotate(0deg); filter: brightness(1); }
+  10% { transform: scale(1.1) rotate(-4deg); filter: brightness(2.5) saturate(4); }
+  25% { transform: scale(0.92) rotate(3deg); filter: brightness(0.6); }
+  40% { transform: scale(1.05) rotate(-2deg); filter: brightness(1.8); }
+  60% { transform: scale(0.97) rotate(1deg); }
+  100% { transform: scale(1) rotate(0deg); filter: brightness(1); }
+}
+
+@keyframes hero-defend {
+  0% { box-shadow: 0 0 8px currentColor; }
+  30% { box-shadow: 0 0 40px currentColor, 0 0 80px currentColor, inset 0 0 20px currentColor; transform: scale(1.08); }
+  60% { box-shadow: 0 0 20px currentColor, 0 0 40px currentColor; transform: scale(1.03); }
+  100% { box-shadow: 0 0 8px currentColor; transform: scale(1); }
+}
+
+@keyframes ultimate-entrance {
+  0% { opacity: 0; transform: translateY(60px) scale(0.7); }
+  40% { opacity: 1; transform: translateY(-10px) scale(1.08); }
+  65% { transform: translateY(5px) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes ultimate-text-in {
+  0% { opacity: 0; letter-spacing: 0.8em; transform: scaleX(1.4); }
+  60% { opacity: 1; letter-spacing: 0.15em; }
+  100% { opacity: 1; letter-spacing: 0.1em; transform: scaleX(1); }
+}
+
+@keyframes ultimate-bg-pulse {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 0.95; }
+}
+
+@keyframes sweep-digital {
+  0% { transform: translateX(-110%); opacity: 0.9; }
+  50% { opacity: 0.6; }
+  100% { transform: translateX(110%); opacity: 0; }
+}
+
+@keyframes card-blur-in {
+  0% { opacity: 0; transform: scale(0.8) translateY(20px); }
+  60% { opacity: 1; transform: scale(1.03) translateY(-4px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes qr-scan {
+  0%, 100% { top: 0; opacity: 0.8; }
+  50% { top: calc(100% - 2px); opacity: 1; }
+}
+
+@keyframes timer-urgent-pulse {
+  0%, 100% { filter: drop-shadow(0 0 6px currentColor); }
+  50% { filter: drop-shadow(0 0 18px currentColor) drop-shadow(0 0 36px currentColor); }
+}
+
+@keyframes aura-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 0.65; transform: scale(1.08); }
+}
+
+@keyframes badge-bounce {
+  0% { opacity: 0; transform: translateX(-50%) translateY(0) scale(0.5); }
+  25% { opacity: 1; transform: translateX(-50%) translateY(-12px) scale(1.1); }
+  50% { transform: translateX(-50%) translateY(-18px) scale(1.0); }
+  75% { opacity: 1; transform: translateX(-50%) translateY(-22px) scale(0.95); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-30px) scale(0.8); }
+}
+
+@keyframes server-explode {
+  0% { transform: scale(1); filter: brightness(1); }
+  15% { transform: scale(1.3) rotate(-3deg); filter: brightness(3) saturate(5); box-shadow: 0 0 20px oklch(0.7 0.28 20); }
+  30% { transform: scale(0.8) rotate(2deg); filter: brightness(0.5); }
+  50% { transform: scale(1.1) rotate(-1deg); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+
+@keyframes server-led-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes turn-slide-in {
+  0% { opacity: 0; transform: scale(0.8) translateY(20px); }
+  60% { opacity: 1; transform: scale(1.05) translateY(-5px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes glitch {
+  0%, 100% { transform: translateX(0); clip-path: none; }
+  10% { transform: translateX(-4px); clip-path: inset(10% 0 80% 0); }
+  20% { transform: translateX(4px); clip-path: inset(60% 0 30% 0); }
+  30% { transform: translateX(0); clip-path: none; }
+  40% { transform: translateX(-2px); clip-path: inset(40% 0 50% 0); }
+  50% { transform: translateX(0); }
+}
+
+@keyframes hero-activate {
+  0% { transform: scale(1); box-shadow: 0 0 8px currentColor; }
+  30% { transform: scale(1.15); box-shadow: 0 0 30px currentColor, 0 0 60px currentColor; }
+  60% { transform: scale(1.05); }
+  100% { transform: scale(1); box-shadow: 0 0 8px currentColor; }
+}
+
+@keyframes badge-float {
+  0% { opacity: 0; transform: translateX(-50%) translateY(0) scale(0.7); }
+  20% { opacity: 1; transform: translateX(-50%) translateY(-8px) scale(1.05); }
+  70% { opacity: 1; transform: translateX(-50%) translateY(-14px) scale(1); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-22px) scale(0.9); }
+}
+
+@keyframes ultimate-flash {
+  0% { opacity: 0; transform: scale(0.5); }
+  30% { opacity: 1; transform: scale(1.1); }
+  70% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.2); }
+}
+
+@keyframes particles-burst {
+  0% { opacity: 1; transform: translate(0, 0) scale(1); }
+  100% { opacity: 0; transform: translate(var(--tx), var(--ty)) scale(0.3); }
+}
+
+@keyframes turn-bg-pulse {
+  0%, 100% { opacity: 0.08; }
+  50% { opacity: 0.15; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .server-explode,
+  .hero-activate,
+  .badge-float,
+  .turn-slide-in,
+  .glitch-text {
+    animation: none !important;
+  }
+}
+
+.server-explode {
+  animation: server-explode 0.7s ease-out;
+}
+
+.hero-activate-anim {
+  animation: hero-activate 0.8s ease-out;
+}
+
+.glitch-text {
+  animation: glitch 0.6s ease-in-out;
+}
+
+.turn-slide-in {
+  animation: turn-slide-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.hero-hit-anim {
+  animation: hero-hit 0.6s ease-out;
+}
+
+.hero-defend-anim {
+  animation: hero-defend 0.7s ease-out;
+}
+
+.ultimate-entrance-anim {
+  animation: ultimate-entrance 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.ultimate-text-anim {
+  animation: ultimate-text-in 0.8s ease-out forwards;
+}
+
+.sweep-digital {
+  animation: sweep-digital 0.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.card-blur-in {
+  animation: card-blur-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.badge-bounce-anim {
+  animation: badge-bounce 2.2s ease-out forwards;
+}
+
+.aura-pulse-anim {
+  animation: aura-pulse 2s ease-in-out infinite;
+}
+
+.timer-urgent {
+  animation: timer-urgent-pulse 0.4s ease-in-out infinite;
+}
+
+/* ─── Game Keyframes (Original) ─────────────────────────── */
+@keyframes card-attack {
+  0% { transform: translateX(0) scale(1); }
+  30% { transform: translateX(20px) scale(1.05); }
+  60% { transform: translateX(-5px) scale(0.98); }
+  100% { transform: translateX(0) scale(1); }
+}
+
+@keyframes card-defend {
+  0% { transform: scale(1); box-shadow: none; }
+  40% { transform: scale(1.08); box-shadow: 0 0 30px oklch(0.65 0.2 230); }
+  100% { transform: scale(1); box-shadow: none; }
+}
+
+@keyframes server-damage {
+  0% { transform: scale(1); }
+  20% { transform: scale(1.2) rotate(-5deg); filter: brightness(2) saturate(3); }
+  40% { transform: scale(0.9) rotate(3deg); }
+  100% { transform: scale(1); }
+}
+
+@keyframes server-heal {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.15); filter: brightness(1.8); }
+  100% { transform: scale(1); }
+}
+
+@keyframes float-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 8px oklch(0.75 0.25 145 / 0.5); }
+  50% { box-shadow: 0 0 20px oklch(0.75 0.25 145 / 0.9), 0 0 40px oklch(0.75 0.25 145 / 0.5); }
+}
+
+@keyframes neon-flicker {
+  0%, 100% { opacity: 1; }
+  92% { opacity: 1; }
+  93% { opacity: 0.8; }
+  95% { opacity: 1; }
+  97% { opacity: 0.6; }
+  98% { opacity: 1; }
+}
+
+@keyframes scan-line {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+/* ─── Utility classes ───────────────────────────────────── */
+.neon-text-green {
+  color: oklch(0.82 0.25 145);
+  text-shadow: 0 0 10px oklch(0.75 0.25 145), 0 0 20px oklch(0.75 0.25 145 / 0.5);
+}
+
+.neon-text-red {
+  color: oklch(0.7 0.28 20);
+  text-shadow: 0 0 10px oklch(0.65 0.28 20), 0 0 20px oklch(0.65 0.28 20 / 0.5);
+}
+
+.neon-text-blue {
+  color: oklch(0.75 0.22 230);
+  text-shadow: 0 0 10px oklch(0.7 0.22 230), 0 0 20px oklch(0.7 0.22 230 / 0.5);
+}
+
+.neon-text-yellow {
+  color: oklch(0.88 0.22 85);
+  text-shadow: 0 0 10px oklch(0.85 0.22 85), 0 0 20px oklch(0.85 0.22 85 / 0.5);
+}
+
+.card-villain-border {
+  border: 2px solid oklch(0.65 0.28 20);
+  box-shadow: 0 0 12px oklch(0.65 0.28 20 / 0.6), inset 0 0 8px oklch(0.65 0.28 20 / 0.1);
+}
+
+.card-villain-border:hover, .card-villain-border.selected {
+  box-shadow: 0 0 20px oklch(0.65 0.28 20 / 0.9), 0 0 40px oklch(0.65 0.28 20 / 0.4), inset 0 0 12px oklch(0.65 0.28 20 / 0.2);
+}
+
+.card-defense-border {
+  border: 2px solid oklch(0.7 0.22 230);
+  box-shadow: 0 0 12px oklch(0.7 0.22 230 / 0.6), inset 0 0 8px oklch(0.7 0.22 230 / 0.1);
+}
+
+.card-defense-border:hover, .card-defense-border.selected {
+  box-shadow: 0 0 20px oklch(0.7 0.22 230 / 0.9), 0 0 40px oklch(0.7 0.22 230 / 0.4), inset 0 0 12px oklch(0.7 0.22 230 / 0.2);
+}
+
+.card-action-border {
+  border: 2px solid oklch(0.85 0.22 85);
+  box-shadow: 0 0 12px oklch(0.85 0.22 85 / 0.6), inset 0 0 8px oklch(0.85 0.22 85 / 0.1);
+}
+
+.card-action-border:hover, .card-action-border.selected {
+  box-shadow: 0 0 20px oklch(0.85 0.22 85 / 0.9), 0 0 40px oklch(0.85 0.22 85 / 0.4), inset 0 0 12px oklch(0.85 0.22 85 / 0.2);
+}
+
+.card-hero-border {
+  border: 2px solid oklch(0.75 0.25 145);
+  box-shadow: 0 0 12px oklch(0.75 0.25 145 / 0.6), inset 0 0 8px oklch(0.75 0.25 145 / 0.1);
+}
+
+.card-hero-border:hover, .card-hero-border.selected {
+  box-shadow: 0 0 20px oklch(0.75 0.25 145 / 0.9), 0 0 40px oklch(0.75 0.25 145 / 0.4), inset 0 0 12px oklch(0.75 0.25 145 / 0.2);
+}
+
+.card-attacking {
+  animation: card-attack 0.4s ease-in-out;
+}
+
+.card-defending {
+  animation: card-defend 0.4s ease-in-out;
+}
+
+.server-damaged {
+  animation: server-damage 0.5s ease-in-out;
+}
+
+.server-healed {
+  animation: server-heal 0.5s ease-in-out;
+}
+
+.zone-shake {
+  animation: shake 0.4s ease-in-out;
+}
+
+.animate-float-in {
+  animation: float-in 0.4s ease-out forwards;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-neon-flicker {
+  animation: neon-flicker 4s ease-in-out infinite;
+}
+
+/* Circuit background pattern */
+.circuit-bg {
+  background-image:
+    linear-gradient(oklch(0.75 0.25 145 / 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(0.75 0.25 145 / 0.06) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Hexagon background pattern */
+.hex-bg {
+  background-color: oklch(0.08 0.02 240);
+  background-image: radial-gradient(circle at 50% 50%, oklch(0.75 0.25 145 / 0.03) 0%, transparent 70%);
+}
+
+/* Scanline overlay */
+.scanlines::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    oklch(0.0 0.0 0 / 0.03) 2px,
+    oklch(0.0 0.0 0 / 0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: oklch(0.1 0.025 240);
+}
+::-webkit-scrollbar-thumb {
+  background: oklch(0.3 0.05 240);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.75 0.25 145 / 0.6);
+}
