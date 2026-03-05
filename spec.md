@@ -1,41 +1,46 @@
 # Ciber-Guardianes de Chile
 
 ## Current State
-Full card game with 60 cards (14 villains, 12 defenses, 10 actions, 4 heroes, 20 servers), 2-4 player support, game levels (20/35/50 rounds), hero ultimates, server rack visuals with LED animations, turn transition overlay, combat log, Regla del Saber popup, surrender button, and dark cyberpunk design.
+Juego de cartas digital completo con:
+- 4 héroes (Pudú, Zorro Chilla, Lechuza, Gato Colocolo) con habilidades pasivas y definitivas
+- 36 cartas jugables (14 villanos + 12 defensas + 10 acciones) con efectos completos
+- Sistema de combate con defensa activa fuera de turno
+- Timer de defensa circular con cuenta regresiva de 10 segundos
+- Sistema de servidores/vidas visibles
+- Overlay de transición de turno épico con "PASA EL DISPOSITIVO"
+- Overlay de habilidad definitiva full-screen
+- Regla del Saber (popup didáctico con bonus)
+- Niveles por rondas (20/35/50)
+- Botón de rendirse con confirmación
+- Menú principal con tabs: Jugar, Mercado, Mis Cartas, Logros
+- Modal de sala multijugador QR (simulado)
+- Tab Manual del Juego (brochure)
+- Modo de un solo dispositivo (se pasa el teléfono)
+- Fondo de batalla
+- Log de combate
 
 ## Requested Changes (Diff)
 
 ### Add
-- **Multiplayer QR Room**: Button "Sala Multijugador" in the lobby (StartScreen play tab) that opens a modal with: simulated QR code (SVG grid pattern), random room code (e.g. X7KP2M), and a list of simulated connected players with online status indicators.
-- **Defense Timer Overlay**: When a pending attack exists, show a circular countdown timer (10 seconds) that changes color green→orange→red. If timer expires, auto-apply damage with server explosion animation. Replaces the simple "ATAQUE PENDIENTE" indicator.
-- **Enhanced Hero Animations**: 
-  - Each hero has its own aura color (Pudú=green, Zorro=golden, Lechuza=blue, Gato=purple)
-  - Attack animation: `hero-activate` (flash + scale) 
-  - Receive damage: `hero-hit` (shake + color glitch per hero color)
-  - Defend success: `hero-defend` (bright glow)
-  - Floating badges above hero with contextual messages ("¡Ataque Bloqueado! 🛡️", "¡Daño Recibido! 💀", "¡Definitiva Activada! ⚡")
-- **Card Blur Detail**: When any card is tapped/clicked, a full backdrop blur overlay appears showing the card enlarged with name, type, full effect, and didactic info in a highlighted panel. Triggered from both PlayerZone hand cards and GameCard clicks.
-- **Ultimate Ability Overlay**: When the "DEFINITIVA" button is pressed, a full-screen overlay appears with: hero entrance animation, hero image large, ability name, and effect text. Auto-closes after ~2.5s. Button labeled "DEFINITIVA" (not just "Habilidad").
-- **New CSS keyframes**: `hero-hit` (shake + color shift), `hero-defend` (radial glow pulse), `timer-pulse` (pulsing glow for urgent timer), `ultimate-entrance` (hero slides in from bottom), `sweep-digital` (horizontal sweep for turn transition), `card-blur-in` (zoom in for card detail).
+- Tab "Manual" / instrucciones del juego como brochure digital completo en el StartScreen (pantalla de inicio), con todas las reglas, fases del turno, tipos de cartas, héroes, diccionario de términos y Reglas de Oro
+- El tab de instrucciones debe estar visible y accesible desde el inicio sin necesidad de iniciar una partida
+- Modo de juego: solo (1 jugador vs IA) — con IA oponente básica que elige cartas aleatorias con lógica de prioridad
+- Botón "1 Jugador (vs IA)" en el tab Jugar del StartScreen
 
 ### Modify
-- **TurnTransitionOverlay**: Add "PASA EL DISPOSITIVO" text below player name. Add horizontal sweep/wipe digital effect. Make it more dramatic with bigger hero image.
-- **HeroToken**: Add `isHit` and `isDefending` props for new animation states. Improve floating badge to show contextual messages based on event type. Aura ring always visible (dim when not active, bright on events).
-- **PlayerZone**: Wire `isHit` state when player receives damage, `isDefending` state on defense. Pass new states to HeroToken.
-- **GameScreen**: Replace "ATAQUE PENDIENTE" section with the defense timer overlay. Track which player just received damage for `hero-hit` animation. Track which player just defended for `hero-defend`. Connect card click → card blur modal. Change ultimate button label to "DEFINITIVA".
-- **StartScreen**: Add "Sala Multijugador" button in the play tab above the player count selector.
+- StartScreen: agregar tab "📖 Manual" junto a los tabs existentes (Jugar, Mercado, Mis Cartas, Logros)
+- StartScreen tab Jugar: agregar opción de 1 jugador vs IA además de las opciones 2/3/4 jugadores
+- GameScreen: cuando playerCount === 1 (modo IA), el jugador de IA actúa automáticamente en su turno con lógica básica
+- HeroSelectScreen: cuando es modo 1 jugador, solo el jugador 1 elige héroe; la IA recibe un héroe aleatorio
+- Preservar todas las funcionalidades existentes sin romper nada
 
 ### Remove
-- Simple "ATAQUE PENDIENTE" text + "Sin Defensa →" button from center area (replaced by defense timer overlay).
+- Nada se elimina
 
 ## Implementation Plan
-1. Add new CSS keyframes and utility classes to index.css
-2. Create `MultiplayerRoomModal.tsx` component with QR simulation, room code, player list
-3. Create `DefenseTimerOverlay.tsx` with circular SVG countdown, color transitions, auto-resolve
-4. Create `CardDetailOverlay.tsx` with backdrop blur and card expansion
-5. Create `UltimateOverlay.tsx` with hero entrance animation and effect display
-6. Update `HeroToken.tsx` with isHit/isDefending props, better badge messages, aura ring
-7. Update `PlayerZone.tsx` to pass new animation states
-8. Update `TurnTransitionOverlay` in GameScreen.tsx with "PASA EL DISPOSITIVO", sweep effect
-9. Update `GameScreen.tsx`: defense timer, card blur trigger, ultimate overlay trigger, button labels
-10. Update `StartScreen.tsx`: add Sala Multijugador button and modal
+1. Agregar tab "Manual" al StartScreen con contenido completo del reglamento (preparación, fases, combate, héroes, tipos de cartas, diccionario, Reglas de Oro)
+2. Agregar opción de 1 jugador (modo IA) al tab Jugar del StartScreen
+3. Actualizar HeroSelectScreen para manejar mode=ai (playerCount=1, IA recibe héroe aleatorio)
+4. Agregar lógica de IA al GameScreen/gameEngine: cuando es el turno de un jugador IA, ejecuta automáticamente sus acciones con delay
+5. Actualizar App.tsx para manejar playerCount=1 y pasar modo IA al GameScreen
+6. Validar que build/typecheck pasa sin errores

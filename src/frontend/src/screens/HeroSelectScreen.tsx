@@ -22,6 +22,7 @@ interface HeroSelectScreenProps {
   heroSelections: (HeroId | null)[];
   onSelectHero: (heroId: HeroId) => void;
   onConfirm: () => void;
+  isAIMode?: boolean;
 }
 
 const ROLE_ICONS: Record<string, React.ElementType> = {
@@ -51,6 +52,7 @@ export default function HeroSelectScreen({
   heroSelections,
   onSelectHero,
   onConfirm,
+  isAIMode = false,
 }: HeroSelectScreenProps) {
   const [_hoveredId, setHoveredId] = useState<HeroId | null>(null);
   const takenHeroes = heroSelections
@@ -59,12 +61,15 @@ export default function HeroSelectScreen({
 
   const currentSelection = heroSelections[heroSelectStep];
 
+  // In AI mode, only show player 1 selection step indicator (not AI)
+  const displayPlayerCount = isAIMode ? 1 : playerCount;
+
   return (
     <div className="min-h-screen circuit-bg flex flex-col items-center justify-center p-4">
       {/* Header */}
       <div className="text-center mb-6 animate-float-in">
         <div className="flex items-center justify-center gap-2 mb-1">
-          {Array.from({ length: playerCount }, (_, i) => i).map((i) => (
+          {Array.from({ length: displayPlayerCount }, (_, i) => i).map((i) => (
             <div
               key={`player-step-${i}`}
               className={`w-6 h-6 rounded-full border-2 flex items-center justify-center text-[9px] font-bold transition-all
@@ -81,11 +86,19 @@ export default function HeroSelectScreen({
           ))}
         </div>
         <h2 className="text-2xl md:text-3xl font-black font-display neon-text-green">
-          Jugador {heroSelectStep + 1}
+          {isAIMode ? "¡Elige tu Héroe!" : `Jugador ${heroSelectStep + 1}`}
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Elige tu Héroe Guardián
+          {isAIMode
+            ? "La IA elegirá su héroe automáticamente"
+            : "Elige tu Héroe Guardián"}
         </p>
+        {isAIMode && (
+          <div className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-purple-400 bg-purple-500/10 border border-purple-500/30 rounded-full px-3 py-1">
+            <span>🤖</span>
+            <span>Modo 1 Jugador vs IA</span>
+          </div>
+        )}
       </div>
 
       {/* Hero grid */}
@@ -178,7 +191,7 @@ export default function HeroSelectScreen({
           className="bg-primary text-primary-foreground font-bold text-base h-12 px-8 rounded-xl disabled:opacity-50"
           data-ocid="hero_select.confirm_button"
         >
-          Confirmar Héroe
+          {isAIMode ? "¡Jugar vs IA!" : "Confirmar Héroe"}
           <ChevronRight className="w-5 h-5 ml-1" />
         </Button>
         {!currentSelection && (

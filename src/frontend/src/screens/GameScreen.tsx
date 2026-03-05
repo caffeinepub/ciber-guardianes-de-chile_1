@@ -61,6 +61,7 @@ interface GameScreenProps {
   heroSelections: HeroId[];
   onGameOver: (state: GameState) => void;
   gameLevel?: 1 | 2 | 3;
+  isAIMode?: boolean;
 }
 
 // ── Reducer ──────────────────────────────────────────────────────────────────
@@ -219,6 +220,7 @@ interface TurnTransitionProps {
   nextPlayerHeroName: string;
   heroColor: string;
   onDone: () => void;
+  isAI?: boolean;
 }
 
 function TurnTransitionOverlay({
@@ -227,17 +229,19 @@ function TurnTransitionOverlay({
   nextPlayerHeroName,
   heroColor,
   onDone,
+  isAI = false,
 }: TurnTransitionProps) {
-  const [countdown, setCountdown] = useState(3);
+  const [countdown, setCountdown] = useState(isAI ? 1 : 3);
 
   useEffect(() => {
     if (countdown <= 0) {
       onDone();
       return;
     }
-    const t = setTimeout(() => setCountdown((c) => c - 1), 800);
+    const delay = isAI ? 400 : 800;
+    const t = setTimeout(() => setCountdown((c) => c - 1), delay);
     return () => clearTimeout(t);
-  }, [countdown, onDone]);
+  }, [countdown, onDone, isAI]);
 
   return (
     <div
@@ -344,7 +348,7 @@ function TurnTransitionOverlay({
           </p>
         </div>
 
-        {/* PASA EL DISPOSITIVO */}
+        {/* PASA EL DISPOSITIVO / AI label */}
         <div className="turn-slide-in" style={{ animationDelay: "0.25s" }}>
           <div
             className="px-4 py-2 rounded-xl text-sm font-black uppercase tracking-[0.25em]"
@@ -355,7 +359,7 @@ function TurnTransitionOverlay({
               boxShadow: `0 0 15px ${heroColor.replace("oklch(", "oklch(").replace(")", " / 0.2)")}`,
             }}
           >
-            📲 PASA EL DISPOSITIVO
+            {isAI ? "🤖 TURNO DE LA IA" : "📲 PASA EL DISPOSITIVO"}
           </div>
         </div>
 
@@ -402,6 +406,32 @@ function TurnTransitionOverlay({
   );
 }
 
+// ── AI Turn Helper ────────────────────────────────────────────────────────────
+// Picks a card for the AI to play. Returns the card index and type, or null.
+function pickAICard(
+  gs: GameState,
+): { index: number; type: "villain" | "action" } | null {
+  const aiPlayer = gs.players[1];
+  if (!aiPlayer || !aiPlayer.isOnline) return null;
+  if (gs.currentPhase !== "play") return null;
+  if (aiPlayer.blockedTurns > 0) return null;
+
+  const hand = aiPlayer.hand;
+  if (hand.length === 0) return null;
+
+  const humanPlayer = gs.players[0];
+  if (!humanPlayer || !humanPlayer.isOnline) return null;
+
+  // Priority: villain > action > skip
+  const villainIdx = hand.findIndex((c) => c.type === "villain");
+  if (villainIdx !== -1) return { index: villainIdx, type: "villain" };
+
+  const actionIdx = hand.findIndex((c) => c.type === "action");
+  if (actionIdx !== -1) return { index: actionIdx, type: "action" };
+
+  return null;
+}
+
 // ── Hero colors map ──────────────────────────────────────────────────────────
 const HERO_COLORS: Record<string, string> = {
   pudu: "oklch(0.75 0.25 145)",
@@ -426,12 +456,32 @@ export default function GameScreen({
   heroSelections,
   onGameOver,
   gameLevel = 1,
+  isAIMode = false,
 }: GameScreenProps) {
-  const [state, dispatch] = useReducer(gameReducer, null, () =>
-    createInitialState(playerCount, heroSelections, gameLevel),
-  );
+  const [state, dispatch] = useReducer(gameReducer, null, () => {
+    const initialState = createInitialState(
+      playerCount,
+      heroSelections,
+      gameLevel,
+    );
+    if (isAIMode && initialState.players.length > 1) {
+      // Rename player 2 to "IA - HeroName"
+      const aiHero = getHeroById(initialState.players[1].heroId);
+      const aiName = aiHero
+        ? `IA - ${aiHero.name.replace(/"[^"]*"/g, "").trim()}`
+        : "IA";
+      return {
+        ...initialState,
+        players: initialState.players.map((p, i) =>
+          i === 1 ? { ...p, name: aiName } : p,
+        ),
+      };
+    }
+    return initialState;
+  });
 
   const [cardsPlayedThisTurn, setCardsPlayedThisTurn] = useState(0);
+  const [isAIThinking, setIsAIThinking] = useState(false);
   const [showTurnTransition, setShowTurnTransition] = useState(false);
   const [transitionData, setTransitionData] = useState<{
     name: string;
@@ -610,6 +660,149 @@ export default function GameScreen({
     setTransitionData(null);
   }, []);
 
+  // ── AI Turn Logic ────────────────────────────────────────────────────────
+  // AI is always player index 1 (id=1). We use a stateRef to always read
+  // the latest game state inside setTimeout callbacks.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const aiTurnRef = useRef(false);
+  // Track how many cards AI has played this turn
+  const aiCardsPlayedRef = useRef(0);
+
+  // Handle AI defense when AI is being attacked
+  useEffect(() => {
+    if (!isAIMode) return;
+    if (!state.pendingAttack) return;
+    if (state.pendingAttack.targetPlayerId !== 1) return;
+    if (state.screen !== "game") return;
+
+    const t = setTimeout(() => {
+      const gs = stateRef.current;
+      const aiPlayer = gs.players[1];
+      if (!aiPlayer) return;
+      const defenseCards = aiPlayer.hand.filter((c) => c.type === "defense");
+      if (defenseCards.length > 0 && Math.random() > 0.35) {
+        const randomDefense =
+          defenseCards[Math.floor(Math.random() * defenseCards.length)];
+        dispatch({ type: "DEFEND", card: randomDefense });
+      } else {
+        dispatch({ type: "SKIP_DEFENSE" });
+      }
+    }, 900);
+    return () => clearTimeout(t);
+  }, [isAIMode, state.pendingAttack, state.screen]);
+
+  // AI Draw Phase: trigger when it's AI's draw turn
+  useEffect(() => {
+    if (!isAIMode) return;
+    if (state.currentPlayerIndex !== 1) return;
+    if (state.currentPhase !== "draw") return;
+    if (state.screen !== "game") return;
+    if (showTurnTransition) return;
+    if (aiTurnRef.current) return;
+
+    aiTurnRef.current = true;
+    aiCardsPlayedRef.current = 0;
+    setIsAIThinking(true);
+
+    const t = setTimeout(() => {
+      dispatch({ type: "DRAW_PHASE" });
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [
+    isAIMode,
+    state.currentPlayerIndex,
+    state.currentPhase,
+    state.screen,
+    showTurnTransition,
+  ]);
+
+  // AI Play Phase: after drawing, play a card (up to 2 times)
+  // We use state.players[1]?.hand.length as a proxy trigger for "AI's hand changed"
+  // biome-ignore lint/correctness/useExhaustiveDependencies: state.players triggers re-evaluation after each card play
+  useEffect(() => {
+    if (!isAIMode) return;
+    if (state.currentPlayerIndex !== 1) return;
+    if (state.currentPhase !== "play") return;
+    if (state.screen !== "game") return;
+    if (state.pendingAttack) return; // wait for pending attack resolution
+    if (!aiTurnRef.current) return;
+
+    if (aiCardsPlayedRef.current >= GAME_CONSTANTS.CARDS_PER_TURN) {
+      // Played max cards — end turn
+      const t = setTimeout(() => {
+        dispatch({ type: "END_TURN" });
+        setCardsPlayedThisTurn(0);
+        setIsAIThinking(false);
+        aiTurnRef.current = false;
+      }, 500);
+      return () => clearTimeout(t);
+    }
+
+    // Attempt to pick and play a card
+    const t = setTimeout(() => {
+      const gs = stateRef.current;
+      const pick = pickAICard(gs);
+
+      if (!pick) {
+        // Nothing useful to play — end turn
+        dispatch({ type: "END_TURN" });
+        setCardsPlayedThisTurn(0);
+        setIsAIThinking(false);
+        aiTurnRef.current = false;
+        return;
+      }
+
+      // Select card
+      dispatch({ type: "SELECT_CARD", index: pick.index });
+
+      // After SELECT_CARD, select target
+      setTimeout(() => {
+        dispatch({ type: "SELECT_TARGET", targetId: 0 });
+
+        // After SELECT_TARGET, confirm/skip saber
+        setTimeout(() => {
+          dispatch({ type: "SABER_SKIP" });
+          aiCardsPlayedRef.current += 1;
+          setCardsPlayedThisTurn(aiCardsPlayedRef.current);
+        }, 200);
+      }, 200);
+    }, 700);
+    return () => clearTimeout(t);
+  }, [
+    isAIMode,
+    state.currentPlayerIndex,
+    state.currentPhase,
+    state.screen,
+    state.pendingAttack,
+    state.players,
+  ]);
+
+  // AI End Phase: if somehow stuck in end phase, move along
+  useEffect(() => {
+    if (!isAIMode) return;
+    if (state.currentPlayerIndex !== 1) return;
+    if (state.currentPhase !== "end") return;
+    if (state.screen !== "game") return;
+    if (!aiTurnRef.current) return;
+
+    const t = setTimeout(() => {
+      dispatch({ type: "END_TURN" });
+      setCardsPlayedThisTurn(0);
+      setIsAIThinking(false);
+      aiTurnRef.current = false;
+    }, 400);
+    return () => clearTimeout(t);
+  }, [isAIMode, state.currentPlayerIndex, state.currentPhase, state.screen]);
+
+  // Reset aiTurnRef when player changes
+  useEffect(() => {
+    if (state.currentPlayerIndex !== 1) {
+      aiTurnRef.current = false;
+      aiCardsPlayedRef.current = 0;
+    }
+  }, [state.currentPlayerIndex]);
+
   const cardSize = playerCount >= 3 ? "sm" : "md";
   const opponentPlayers = state.players.filter(
     (p) => p.id !== currentPlayer.id,
@@ -702,27 +895,50 @@ export default function GameScreen({
 
           {/* Action buttons */}
           <div className="flex items-center gap-2">
-            {state.currentPhase === "draw" && !showTurnTransition && (
-              <Button
-                size="sm"
-                onClick={() => dispatch({ type: "DRAW_PHASE" })}
-                className="bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 hover:bg-yellow-500/30 text-[10px] h-7"
-                data-ocid="game.draw_deck_button"
-              >
-                📡 Robar Carta
-              </Button>
+            {/* AI thinking indicator */}
+            {isAIMode && isAIThinking && state.currentPlayerIndex === 1 && (
+              <div className="flex items-center gap-1.5 text-[10px] text-purple-400 bg-purple-500/10 border border-purple-500/30 rounded-lg px-2 py-1 animate-pulse">
+                <span>🤖</span>
+                <span>IA pensando...</span>
+              </div>
             )}
-            {(state.currentPhase === "play" ||
-              state.currentPhase === "end") && (
-              <Button
-                size="sm"
-                onClick={handleEndTurn}
-                className="bg-primary/20 text-primary border border-primary/50 hover:bg-primary/30 text-[10px] h-7"
-                data-ocid="game.end_turn_button"
-              >
-                Fin del Turno <ChevronRight className="w-3 h-3 ml-0.5" />
-              </Button>
-            )}
+
+            {state.currentPhase === "draw" &&
+              !showTurnTransition &&
+              state.currentPlayerIndex !== 1 && (
+                <Button
+                  size="sm"
+                  onClick={() => dispatch({ type: "DRAW_PHASE" })}
+                  className="bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 hover:bg-yellow-500/30 text-[10px] h-7"
+                  data-ocid="game.draw_deck_button"
+                >
+                  📡 Robar Carta
+                </Button>
+              )}
+            {state.currentPhase === "draw" &&
+              !showTurnTransition &&
+              !isAIMode &&
+              state.currentPlayerIndex === 1 && (
+                <Button
+                  size="sm"
+                  onClick={() => dispatch({ type: "DRAW_PHASE" })}
+                  className="bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 hover:bg-yellow-500/30 text-[10px] h-7"
+                  data-ocid="game.draw_deck_button"
+                >
+                  📡 Robar Carta
+                </Button>
+              )}
+            {(state.currentPhase === "play" || state.currentPhase === "end") &&
+              !(isAIMode && state.currentPlayerIndex === 1) && (
+                <Button
+                  size="sm"
+                  onClick={handleEndTurn}
+                  className="bg-primary/20 text-primary border border-primary/50 hover:bg-primary/30 text-[10px] h-7"
+                  data-ocid="game.end_turn_button"
+                >
+                  Fin del Turno <ChevronRight className="w-3 h-3 ml-0.5" />
+                </Button>
+              )}
 
             {/* Surrender button */}
             <AlertDialog>
@@ -969,6 +1185,7 @@ export default function GameScreen({
             HERO_COLORS[transitionData.heroId] ?? "oklch(0.75 0.25 145)"
           }
           onDone={handleTurnTransitionDone}
+          isAI={isAIMode && state.currentPlayerIndex === 1}
         />
       )}
 

@@ -2,7 +2,8 @@
 // Screen router only — no game logic here.
 
 import { Toaster } from "@/components/ui/sonner";
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
+import { HEROES } from "./data/heroes";
 import type { GameState, HeroId } from "./game/gameTypes";
 import GameOverScreen from "./screens/GameOverScreen";
 import GameScreen from "./screens/GameScreen";
@@ -23,12 +24,50 @@ export default function App() {
     null,
   ]);
   const [finalGameState, setFinalGameState] = useState<GameState | null>(null);
+  const [isAIMode, setIsAIMode] = useState(false);
+  const [roomCodeFromUrl, setRoomCodeFromUrl] = useState<string | null>(null);
+
+  // Check URL for ?room= param on mount — auto-show the join modal
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("room");
+    if (code) {
+      setRoomCodeFromUrl(code.toUpperCase());
+    }
+  }, []);
 
   const handleStartGame = useCallback((count: number, level: 1 | 2 | 3) => {
     setPlayerCount(count);
     setGameLevel(level);
     setHeroSelectStep(0);
     setHeroSelections([null, null, null, null]);
+    setIsAIMode(false);
+    setScreen("heroSelect");
+  }, []);
+
+  const handleStartMultiplayerGame = useCallback(
+    (count: number, level: 1 | 2 | 3) => {
+      setPlayerCount(count);
+      setGameLevel(level);
+      setHeroSelectStep(0);
+      setHeroSelections([null, null, null, null]);
+      setIsAIMode(false);
+      // Clear URL param so it doesn't re-open on refresh
+      const url = new URL(window.location.href);
+      url.searchParams.delete("room");
+      window.history.replaceState({}, "", url.toString());
+      setRoomCodeFromUrl(null);
+      setScreen("heroSelect");
+    },
+    [],
+  );
+
+  const handleStartAIGame = useCallback((level: 1 | 2 | 3) => {
+    setPlayerCount(2);
+    setGameLevel(level);
+    setHeroSelectStep(0);
+    setHeroSelections([null, null, null, null]);
+    setIsAIMode(true);
     setScreen("heroSelect");
   }, []);
 
@@ -44,12 +83,26 @@ export default function App() {
   );
 
   const handleConfirmHero = useCallback(() => {
-    if (heroSelectStep < playerCount - 1) {
+    if (isAIMode) {
+      // In AI mode: only player 1 (step 0) selects; then pick a random hero for AI
+      const player1Hero = heroSelections[0];
+      const availableHeroes = HEROES.filter((h) => h.id !== player1Hero).map(
+        (h) => h.id,
+      );
+      const aiHero =
+        availableHeroes[Math.floor(Math.random() * availableHeroes.length)];
+      setHeroSelections((prev) => {
+        const next = [...prev];
+        next[1] = aiHero as HeroId;
+        return next;
+      });
+      setScreen("game");
+    } else if (heroSelectStep < playerCount - 1) {
       setHeroSelectStep((s) => s + 1);
     } else {
       setScreen("game");
     }
-  }, [heroSelectStep, playerCount]);
+  }, [heroSelectStep, playerCount, isAIMode, heroSelections]);
 
   const handleGameOver = useCallback((gameState: GameState) => {
     setFinalGameState(gameState);
@@ -64,11 +117,19 @@ export default function App() {
 
   const handleHome = useCallback(() => {
     setScreen("start");
+    setIsAIMode(false);
   }, []);
 
   return (
     <>
-      {screen === "start" && <StartScreen onStartGame={handleStartGame} />}
+      {screen === "start" && (
+        <StartScreen
+          onStartGame={handleStartGame}
+          onStartAIGame={handleStartAIGame}
+          onStartMultiplayerGame={handleStartMultiplayerGame}
+          initialRoomCode={roomCodeFromUrl}
+        />
+      )}
 
       {screen === "heroSelect" && (
         <HeroSelectScreen
@@ -77,6 +138,7 @@ export default function App() {
           heroSelections={heroSelections}
           onSelectHero={handleSelectHero}
           onConfirm={handleConfirmHero}
+          isAIMode={isAIMode}
         />
       )}
 
@@ -86,6 +148,7 @@ export default function App() {
           heroSelections={heroSelections.slice(0, playerCount) as HeroId[]}
           onGameOver={handleGameOver}
           gameLevel={gameLevel}
+          isAIMode={isAIMode}
         />
       )}
 
