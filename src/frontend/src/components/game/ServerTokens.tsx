@@ -1,5 +1,5 @@
 // ─── ServerTokens Component ──────────────────────────────────────────────────
-// Displays the 5 server (life) tokens as mini rack server blocks.
+// Displays the 5 server (life) tokens as illustrated server images.
 
 import type React from "react";
 import { useEffect, useState } from "react";
@@ -40,6 +40,7 @@ function ServerBlock({
   size: "sm" | "md";
 }) {
   const [exploding, setExploding] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [prevStatus, setPrevStatus] = useState(server.status);
 
   useEffect(() => {
@@ -49,165 +50,109 @@ function ServerBlock({
       setPrevStatus(server.status);
       return () => clearTimeout(timer);
     }
+    if (prevStatus === "damaged" && server.status === "healthy") {
+      setRestoring(true);
+      const timer = setTimeout(() => setRestoring(false), 600);
+      setPrevStatus(server.status);
+      return () => clearTimeout(timer);
+    }
     if (prevStatus !== server.status) {
       setPrevStatus(server.status);
     }
   }, [server.status, prevStatus]);
 
-  const w = size === "sm" ? 24 : 32;
-  const h = size === "sm" ? 14 : 20;
-  const label = `SRV-${server.index + 1}`;
+  // Dimensions
+  const w = size === "sm" ? 28 : 40;
+  const h = size === "sm" ? 38 : 54;
+  const labelText = `SRV-${server.index + 1}`;
   const labelStyle: React.CSSProperties = {
     fontSize: size === "sm" ? 6 : 7,
     letterSpacing: "0.05em",
     fontFamily: "monospace",
   };
 
-  if (server.status === "healthy") {
-    return (
-      <div className="flex flex-col items-center gap-0.5">
-        <div
-          title={`${label} — Activo`}
-          style={{ width: w, height: h }}
-          className={`relative rounded-sm overflow-hidden${exploding ? " server-explode" : ""}`}
-        >
-          {/* Body gradient */}
-          <div
-            className="absolute inset-0 rounded-sm"
-            style={{
-              background:
-                "linear-gradient(180deg, oklch(0.18 0.04 240) 0%, oklch(0.12 0.03 240) 100%)",
-              boxShadow:
-                "0 0 6px oklch(0.75 0.25 145 / 0.4), inset 0 1px 0 oklch(0.3 0.05 240)",
-            }}
-          />
-          {/* Green LED strip */}
-          <div
-            className="absolute top-0 left-0 right-0"
-            style={{
-              height: 3,
-              background: "oklch(0.75 0.25 145)",
-              boxShadow:
-                "0 0 6px oklch(0.75 0.25 145), 0 0 12px oklch(0.75 0.25 145 / 0.5)",
-            }}
-          />
-          {/* Blinking green dot */}
-          <div
-            className="absolute"
-            style={{
-              width: 3,
-              height: 3,
-              right: 3,
-              top: "50%",
-              transform: "translateY(-50%)",
-              borderRadius: "50%",
-              background: "oklch(0.75 0.25 145)",
-              animation: "server-led-blink 1.4s ease-in-out infinite",
-              boxShadow: "0 0 4px oklch(0.75 0.25 145)",
-            }}
-          />
-          {/* Vent lines */}
-          {[0.5, 0.72].map((y) => (
-            <div
-              key={y}
-              className="absolute left-1 right-3"
-              style={{
-                height: 1,
-                top: `${y * 100}%`,
-                background: "oklch(0.3 0.04 240 / 0.6)",
-              }}
-            />
-          ))}
-        </div>
-        <span style={{ ...labelStyle, color: "oklch(0.55 0.08 145)" }}>
-          {label}
-        </span>
-      </div>
-    );
-  }
+  // Image source and glow based on status
+  let imgSrc = "/assets/generated/server-healthy.dim_120x160.png";
+  let glowColor = "oklch(0.75 0.25 145 / 0.5)";
+  let statusColor = "oklch(0.55 0.08 145)";
+  let extraClass = "";
 
   if (server.status === "damaged") {
-    return (
-      <div className="flex flex-col items-center gap-0.5">
-        <div
-          title={`${label} — Dañado`}
-          style={{ width: w, height: h }}
-          className={`relative rounded-sm overflow-hidden${exploding ? " server-explode" : ""}`}
-        >
-          {/* Red body */}
-          <div
-            className="absolute inset-0 rounded-sm"
-            style={{
-              background:
-                "linear-gradient(180deg, oklch(0.15 0.06 20) 0%, oklch(0.1 0.04 20) 100%)",
-              boxShadow:
-                "0 0 8px oklch(0.65 0.28 20 / 0.5), inset 0 1px 0 oklch(0.25 0.08 20)",
-            }}
-          />
-          {/* Red LED strip */}
-          <div
-            className="absolute top-0 left-0 right-0"
-            style={{
-              height: 3,
-              background: "oklch(0.65 0.28 20)",
-              boxShadow:
-                "0 0 6px oklch(0.65 0.28 20), 0 0 14px oklch(0.65 0.28 20 / 0.7)",
-            }}
-          />
-          {/* Flickering red dot */}
-          <div
-            className="absolute"
-            style={{
-              width: 3,
-              height: 3,
-              right: 3,
-              top: "50%",
-              transform: "translateY(-50%)",
-              borderRadius: "50%",
-              background: "oklch(0.7 0.28 20)",
-              animation: "server-led-blink 0.3s ease-in-out infinite",
-              boxShadow: "0 0 5px oklch(0.7 0.28 20)",
-            }}
-          />
-          {/* Crack pattern */}
-          <div
-            className="absolute inset-0"
-            style={{
-              background:
-                "repeating-linear-gradient(-45deg, transparent, transparent 2px, oklch(0.65 0.28 20 / 0.08) 2px, oklch(0.65 0.28 20 / 0.08) 3px)",
-            }}
-          />
-        </div>
-        <span style={{ ...labelStyle, color: "oklch(0.65 0.28 20)" }}>
-          {label}
-        </span>
-      </div>
-    );
+    imgSrc = "/assets/generated/server-damaged.dim_120x160.png";
+    glowColor = "oklch(0.65 0.28 20 / 0.7)";
+    statusColor = "oklch(0.65 0.28 20)";
+    extraClass = exploding ? "server-explode" : "server-sparking";
+  } else if (server.status === "lost") {
+    imgSrc = "/assets/generated/server-destroyed.dim_120x160.png";
+    glowColor = "transparent";
+    statusColor = "oklch(0.3 0.02 240)";
+    extraClass = "";
+  } else {
+    // healthy
+    extraClass = restoring ? "server-restoring" : "";
   }
 
-  // Lost (destroyed)
   return (
-    <div className="flex flex-col items-center gap-0.5 opacity-25">
+    <div
+      className="flex flex-col items-center gap-0.5"
+      style={{ opacity: server.status === "lost" ? 0.35 : 1 }}
+    >
       <div
-        title={`${label} — Destruido`}
-        style={{ width: w, height: h }}
-        className="relative rounded-sm overflow-hidden"
+        title={`${labelText} — ${server.status === "healthy" ? "Activo" : server.status === "damaged" ? "Dañado" : "Destruido"}`}
+        className={`relative rounded overflow-hidden flex-shrink-0 ${extraClass}`}
+        style={{
+          width: w,
+          height: h,
+          boxShadow:
+            server.status !== "lost"
+              ? `0 0 8px ${glowColor}, 0 0 3px ${glowColor}`
+              : undefined,
+          border:
+            server.status === "healthy"
+              ? "1.5px solid oklch(0.55 0.15 145 / 0.7)"
+              : server.status === "damaged"
+                ? "1.5px solid oklch(0.55 0.25 20 / 0.8)"
+                : "1.5px solid oklch(0.2 0.02 240 / 0.5)",
+          transition: "box-shadow 0.3s",
+        }}
       >
-        <div
-          className="absolute inset-0 rounded-sm"
+        <img
+          src={imgSrc}
+          alt={labelText}
           style={{
-            background:
-              "linear-gradient(180deg, oklch(0.1 0.01 240) 0%, oklch(0.07 0.01 240) 100%)",
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            objectPosition: "center",
+            display: "block",
           }}
+          loading="lazy"
         />
-        <div
-          className="absolute top-0 left-0 right-0"
-          style={{ height: 3, background: "oklch(0.15 0.01 240)" }}
-        />
+
+        {/* Sparks overlay for damaged state */}
+        {server.status === "damaged" && !exploding && (
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              background:
+                "radial-gradient(circle at 30% 60%, oklch(0.85 0.28 65 / 0.2) 0%, transparent 40%), radial-gradient(circle at 70% 30%, oklch(0.65 0.28 20 / 0.25) 0%, transparent 35%)",
+              animation: "server-spark 2s ease-in-out infinite",
+            }}
+          />
+        )}
+
+        {/* Restore flash overlay */}
+        {restoring && (
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              background: "oklch(0.75 0.25 145 / 0.35)",
+              animation: "server-restore-flash 0.6s ease-out forwards",
+            }}
+          />
+        )}
       </div>
-      <span style={{ ...labelStyle, color: "oklch(0.3 0.02 240)" }}>
-        {label}
-      </span>
+      <span style={{ ...labelStyle, color: statusColor }}>{labelText}</span>
     </div>
   );
 }

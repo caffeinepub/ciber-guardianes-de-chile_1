@@ -2,6 +2,9 @@
 // Circular countdown timer shown when a pending attack is waiting for defense.
 // Colors: green (10-7s) → orange (6-4s) → red (3-0s)
 // Auto-resolves if timer reaches 0.
+// When no defense cards: shows "Asumiendo daño en X segundos..." with a
+// prominent "⚡ Aceptar daño ahora" button.
+// When defense cards ARE available: shows timer + cards + quick accept button.
 
 import React, { useEffect, useRef, useState } from "react";
 import type { AttackContext, CardDefinition } from "../../game/gameTypes";
@@ -37,6 +40,7 @@ export default function DefenseTimerOverlay({
 }: DefenseTimerOverlayProps) {
   const [timeLeft, setTimeLeft] = useState(TIMER_DURATION);
   const autoResolvedRef = useRef(false);
+  const hasDefenseCards = defenseCards.length > 0;
 
   // Reset timer when a new attack comes in
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — reset on attack change only
@@ -169,8 +173,50 @@ export default function DefenseTimerOverlay({
           </div>
         </div>
 
+        {/* No defense cards: prominent "assuming damage" state */}
+        {!hasDefenseCards && (
+          <div className="text-center w-full">
+            <div
+              className="px-3 py-2 rounded-xl border mb-3"
+              style={{
+                background: "oklch(0.12 0.06 20 / 0.5)",
+                borderColor: "oklch(0.65 0.28 20 / 0.4)",
+              }}
+            >
+              <p
+                className="text-xs font-bold"
+                style={{ color: "oklch(0.75 0.28 20)" }}
+              >
+                Sin cartas de defensa
+              </p>
+              <p
+                className="text-[10px] mt-0.5"
+                style={{ color: "oklch(0.65 0.28 20 / 0.8)" }}
+              >
+                Asumiendo daño en {timeLeft} segundo{timeLeft !== 1 ? "s" : ""}
+                ...
+              </p>
+            </div>
+            {/* Prominent accept damage button */}
+            <button
+              type="button"
+              onClick={onSkipDefense}
+              className="w-full py-3 rounded-xl font-bold text-sm transition-all active:scale-95"
+              style={{
+                background: "oklch(0.55 0.28 20)",
+                color: "oklch(0.98 0.01 240)",
+                boxShadow: "0 0 20px oklch(0.65 0.28 20 / 0.5)",
+                border: "1px solid oklch(0.65 0.28 20 / 0.6)",
+              }}
+              data-ocid="game.accept_damage_button"
+            >
+              ⚡ Aceptar daño ahora
+            </button>
+          </div>
+        )}
+
         {/* Defense cards — scrollable row on mobile */}
-        {defenseCards.length > 0 ? (
+        {hasDefenseCards && (
           <div className="w-full">
             <p className="text-[10px] text-muted-foreground text-center uppercase tracking-widest mb-1.5">
               Selecciona una defensa
@@ -210,27 +256,24 @@ export default function DefenseTimerOverlay({
                 </button>
               ))}
             </div>
-          </div>
-        ) : (
-          <div className="text-center">
-            <p className="text-xs text-muted-foreground">
-              Sin cartas de defensa
-            </p>
-            <p className="text-[10px] text-muted-foreground mt-1">
-              El daño se aplicará automáticamente...
-            </p>
+
+            {/* Quick accept damage shortcut — available even when cards exist */}
+            <button
+              type="button"
+              onClick={onSkipDefense}
+              className="w-full mt-3 py-2.5 rounded-xl font-bold text-sm transition-all active:scale-95"
+              style={{
+                background: "oklch(0.55 0.28 20)",
+                color: "oklch(0.98 0.01 240)",
+                boxShadow: "0 0 16px oklch(0.65 0.28 20 / 0.4)",
+                border: "1px solid oklch(0.65 0.28 20 / 0.5)",
+              }}
+              data-ocid="game.skip_defense_button"
+            >
+              ⚡ Aceptar daño ahora
+            </button>
           </div>
         )}
-
-        {/* Skip button */}
-        <button
-          type="button"
-          onClick={onSkipDefense}
-          className="text-[11px] px-4 py-2 rounded-lg border border-red-500/40 text-red-400 hover:bg-red-500/10 transition-all font-bold"
-          data-ocid="game.skip_defense_button"
-        >
-          No defenderme → Recibir daño
-        </button>
       </div>
     </div>
   );

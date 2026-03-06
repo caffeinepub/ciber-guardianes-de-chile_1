@@ -252,6 +252,8 @@ interface TurnTransitionProps {
   isLocalPlayerNext?: boolean;
   /** In per-device mode: true = this device is waiting for another player */
   isWaitingForOtherPlayer?: boolean;
+  /** Called when local player taps "Empezar mi turno" — triggers DRAW_PHASE via syncDispatch */
+  onStartTurn?: () => void;
 }
 
 function TurnTransitionOverlay({
@@ -264,6 +266,7 @@ function TurnTransitionOverlay({
   isMultiplayerSync = false,
   isLocalPlayerNext,
   isWaitingForOtherPlayer = false,
+  onStartTurn,
 }: TurnTransitionProps) {
   // In per-device mode when it's the OTHER player's turn: auto-dismiss fast (1.5s)
   // When it's MY turn (or AI): auto-dismiss slower, waiting for tap
@@ -283,12 +286,23 @@ function TurnTransitionOverlay({
     if (isWaitingForOtherPlayer) return; // handled by auto-dismiss above
     if (countdown <= 0) {
       onDone();
+      // If it's local player's turn, also trigger draw phase via syncDispatch
+      if (isLocalPlayerNext && onStartTurn) {
+        onStartTurn();
+      }
       return;
     }
     const delay = isAI ? 400 : 800;
     const t = setTimeout(() => setCountdown((c) => c - 1), delay);
     return () => clearTimeout(t);
-  }, [countdown, onDone, isAI, isWaitingForOtherPlayer]);
+  }, [
+    countdown,
+    onDone,
+    isAI,
+    isWaitingForOtherPlayer,
+    isLocalPlayerNext,
+    onStartTurn,
+  ]);
 
   return (
     <div
@@ -449,7 +463,13 @@ function TurnTransitionOverlay({
         {/* Show tap-to-continue only when it's this device's turn or shared/AI mode */}
         {!isWaitingForOtherPlayer && (
           <Button
-            onClick={onDone}
+            onClick={() => {
+              onDone();
+              // When local player taps "Empezar mi turno", also dispatch DRAW_PHASE
+              if (isLocalPlayerNext && onStartTurn) {
+                onStartTurn();
+              }
+            }}
             size="sm"
             className="mt-2 font-bold animate-pulse"
             style={{
@@ -909,12 +929,15 @@ export default function GameScreen({
   const syncDispatch = useCallback(
     (action: Action) => {
       dispatch(action);
-      // Publish to canister relay if in multiplayer sync mode and it's our turn
-      // Defense actions are published even when it's not "our turn" (we're the defender)
+      // Publish to canister relay if in multiplayer sync mode
+      // Always relay: defense actions (defender's turn), DRAW_PHASE (active player starting turn),
+      // END_TURN (active player ending turn), and any other action when it's our turn.
       if (isMultiplayerSync) {
         const isDefenseAction =
           action.type === "DEFEND" || action.type === "SKIP_DEFENSE";
-        if (isMyTurnForDispatch || isDefenseAction) {
+        const isAlwaysRelayed =
+          action.type === "DRAW_PHASE" || action.type === "END_TURN";
+        if (isMyTurnForDispatch || isDefenseAction || isAlwaysRelayed) {
           // Fire-and-forget
           void publishAction(action as Record<string, unknown>);
         }
@@ -979,6 +1002,44 @@ export default function GameScreen({
     setShowTurnTransition(false);
     setTransitionData(null);
   }, []);
+
+  // Called when the local player taps "Empezar mi turno!" in the turn transition overlay.
+  // Dispatches DRAW_PHASE so the guest device advances the game state and publishes to relay.
+  const handleTurnTransitionStartTurn = useCallback(() => {
+    syncDispatch({ type: "DRAW_PHASE" });
+  }, [syncDispatch]);
+
+  // ── Multiplayer safety: if local player is in draw phase but overlay is dismissed, auto-draw ──
+  // This prevents the guest's game from freezing if the turn transition was already dismissed
+  // (e.g. by the defense overlay dismissing it) but DRAW_PHASE was never triggered.
+  // We add a small delay so the overlay animation has time to close first.
+  const drawPhaseTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (!isMultiplayerSync || !isPerDevice) return;
+    if (state.currentPhase !== "draw") {
+      drawPhaseTriggeredRef.current = false;
+      return;
+    }
+    if (!isMyTurn) return; // Not our turn, don't trigger
+    if (showTurnTransition) return; // Overlay is visible, let the user dismiss it
+    if (drawPhaseTriggeredRef.current) return; // Already triggered for this draw phase
+    if (state.screen !== "game") return;
+
+    // Small delay to let state settle before auto-triggering
+    drawPhaseTriggeredRef.current = true;
+    const t = setTimeout(() => {
+      syncDispatch({ type: "DRAW_PHASE" });
+    }, 500);
+    return () => clearTimeout(t);
+  }, [
+    isMultiplayerSync,
+    isPerDevice,
+    state.currentPhase,
+    isMyTurn,
+    showTurnTransition,
+    state.screen,
+    syncDispatch,
+  ]);
 
   // ── AI Turn Logic ────────────────────────────────────────────────────────
   // AI is always player index 1 (id=1). We use a stateRef to always read
@@ -1704,6 +1765,11 @@ export default function GameScreen({
           isMultiplayerSync={isMultiplayerSync}
           isLocalPlayerNext={transitionData.isLocalPlayerTurn}
           isWaitingForOtherPlayer={transitionData.isWaitingForOther}
+          onStartTurn={
+            transitionData.isLocalPlayerTurn
+              ? handleTurnTransitionStartTurn
+              : undefined
+          }
         />
       )}
 

@@ -1,5 +1,6 @@
 // ─── PlayerZone Component ────────────────────────────────────────────────────
 // Displays one player's entire board area: hero, servers, and hand of cards.
+// When it's NOT the player's turn, cards are shown face-down beside the hero.
 
 import { Button } from "@/components/ui/button";
 import { Shield, ShieldCheck, Zap } from "lucide-react";
@@ -10,6 +11,32 @@ import CardDetailOverlay from "./CardDetailOverlay";
 import GameCard from "./GameCard";
 import HeroToken from "./HeroToken";
 import ServerTokens from "./ServerTokens";
+
+// Tiny face-down card for opponent zones or waiting hand (xs size = 32×45px)
+function XsCardBack({ idx, rotation = 0 }: { idx: number; rotation?: number }) {
+  return (
+    <div
+      className="flex-shrink-0 rounded overflow-hidden"
+      style={{
+        width: 32,
+        height: 45,
+        border: "1.5px solid #1e3a8f",
+        boxShadow: "0 0 6px rgba(30,58,143,0.4)",
+        position: "relative",
+        transform: `rotate(${rotation}deg)`,
+        transition: "transform 0.2s",
+      }}
+      aria-label={`Carta ${idx + 1} oculta`}
+    >
+      <img
+        src="/assets/generated/card-back-design.dim_400x560.png"
+        alt=""
+        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        loading="lazy"
+      />
+    </div>
+  );
+}
 
 // Hero neon color for ultimate button
 const HERO_NEON_CLASSES: Record<string, string> = {
@@ -37,7 +64,7 @@ interface PlayerZoneProps {
   isHit?: boolean;
   isDefending?: boolean;
   faceDown?: boolean;
-  cardSize?: "sm" | "md" | "lg";
+  cardSize?: "xs" | "sm" | "md" | "lg";
   currentPhase?: string;
 }
 
@@ -62,6 +89,10 @@ export default function PlayerZone({
   cardSize = "sm",
   currentPhase,
 }: PlayerZoneProps) {
+  // For opponent (faceDown) zones, use xs size regardless of passed cardSize
+  const effectiveCardSize: "xs" | "sm" | "md" | "lg" = faceDown
+    ? "xs"
+    : cardSize;
   const hero = getHeroById(player.heroId);
   const [detailCard, setDetailCard] = useState<CardDefinition | null>(null);
 
@@ -71,6 +102,11 @@ export default function PlayerZone({
   const neonClass = HERO_NEON_CLASSES[player.heroId] ?? HERO_NEON_CLASSES.pudu;
   const showUltimateBtn =
     isCurrentPlayer && currentPhase === "play" && !heroUltimateUsed;
+
+  // Cards are shown face-down beside the hero when it's not this player's turn
+  // AND it's not an opponent zone (faceDown=true already handles opponent)
+  // AND the player is not under attack (so they can still see cards to defend)
+  const showWaitingHand = !faceDown && !isCurrentPlayer && !isUnderAttack;
 
   const handleCardClick = (card: CardDefinition, idx: number) => {
     const isDefendable = isUnderAttack && !faceDown && card.type === "defense";
@@ -113,7 +149,7 @@ export default function PlayerZone({
             : undefined
         }
       >
-        {/* Header: hero + status */}
+        {/* Header: hero + servers */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             {hero && (
@@ -154,10 +190,47 @@ export default function PlayerZone({
                 )}
               </div>
             </div>
+
+            {/* Waiting hand: face-down cards beside hero when not current turn */}
+            {showWaitingHand && player.hand.length > 0 && (
+              <div className="flex items-center ml-1" style={{ gap: -6 }}>
+                {player.hand
+                  .slice(0, Math.min(player.hand.length, 6))
+                  .map((card, idx) => (
+                    <div
+                      key={card.id}
+                      style={{
+                        marginLeft: idx === 0 ? 0 : -10,
+                        zIndex: idx,
+                        transform: `rotate(${(idx - Math.min(player.hand.length, 6) / 2) * 5}deg)`,
+                      }}
+                    >
+                      <XsCardBack idx={idx} />
+                    </div>
+                  ))}
+                {player.hand.length > 6 && (
+                  <span
+                    className="text-[7px] font-bold ml-0.5 px-1 py-0.5 rounded"
+                    style={{
+                      background: "oklch(0.18 0.03 240 / 0.8)",
+                      color: "oklch(0.55 0.05 240)",
+                      border: "1px solid oklch(0.25 0.03 240 / 0.6)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    +{player.hand.length - 6}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Servers */}
-          <ServerTokens servers={player.servers} size="sm" />
+          {/* Servers — more prominent in opponent zones */}
+          <ServerTokens
+            servers={player.servers}
+            size={faceDown ? "md" : "sm"}
+            label={faceDown}
+          />
         </div>
 
         {/* Hero Ultimate button (only for current player during play phase) */}
@@ -175,42 +248,75 @@ export default function PlayerZone({
           </div>
         )}
 
-        {/* Hand */}
-        <div className="flex gap-1 overflow-x-auto pb-1 min-h-[60px] items-end">
-          {player.hand.length === 0 ? (
-            <p className="text-[9px] text-muted-foreground italic self-center mx-auto">
-              Sin cartas
-            </p>
-          ) : (
-            player.hand.map((card, idx) => {
-              const isCardSelected =
-                isCurrentPlayer && selectedCardIndex === idx;
-              const isDefendable =
-                isUnderAttack && !faceDown && card.type === "defense";
-              const isPlayable = isCurrentPlayer && canSelectCards && !faceDown;
+        {/* Hand — only shown when it's this player's turn or under attack */}
+        {(isCurrentPlayer || isUnderAttack) && !faceDown && (
+          <div className="flex gap-1 overflow-x-auto pb-1 items-end min-h-[60px]">
+            {player.hand.length === 0 ? (
+              <p className="text-[9px] text-muted-foreground italic self-center mx-auto">
+                Sin cartas
+              </p>
+            ) : (
+              player.hand.map((card, idx) => {
+                const isCardSelected =
+                  isCurrentPlayer && selectedCardIndex === idx;
+                const isDefendable =
+                  isUnderAttack && !faceDown && card.type === "defense";
+                const isPlayable =
+                  isCurrentPlayer && canSelectCards && !faceDown;
 
-              return (
-                <div key={card.id} className="relative flex-shrink-0">
-                  <GameCard
-                    card={card}
-                    isSelected={isCardSelected}
-                    isPlayable={isPlayable || isDefendable}
-                    isFaceDown={faceDown}
-                    size={cardSize}
-                    onClick={
-                      faceDown ? undefined : () => handleCardClick(card, idx)
-                    }
-                  />
-                  {isDefendable && (
-                    <div className="absolute -top-1 -right-1">
-                      <ShieldCheck className="w-3 h-3 text-blue-400 animate-pulse" />
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
+                return (
+                  <div key={card.id} className="relative flex-shrink-0">
+                    <GameCard
+                      card={card}
+                      isSelected={isCardSelected}
+                      isPlayable={isPlayable || isDefendable}
+                      isFaceDown={false}
+                      size={
+                        effectiveCardSize === "xs" ? "sm" : effectiveCardSize
+                      }
+                      onClick={
+                        faceDown ? undefined : () => handleCardClick(card, idx)
+                      }
+                    />
+                    {isDefendable && (
+                      <div className="absolute -top-1 -right-1">
+                        <ShieldCheck className="w-3 h-3 text-blue-400 animate-pulse" />
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* Opponent zone (faceDown): show xs back cards */}
+        {faceDown && (
+          <div className="flex gap-1 overflow-x-auto pb-1 items-end min-h-[40px]">
+            {player.hand.length === 0 ? (
+              <p className="text-[9px] text-muted-foreground italic self-center mx-auto">
+                Sin cartas
+              </p>
+            ) : (
+              <div className="flex items-center gap-1 flex-wrap">
+                {player.hand.map((card, idx) => (
+                  <XsCardBack key={card.id} idx={idx} />
+                ))}
+                <span
+                  className="text-[8px] font-bold ml-0.5 px-1 py-0.5 rounded"
+                  style={{
+                    background: "oklch(0.18 0.03 240 / 0.8)",
+                    color: "oklch(0.55 0.05 240)",
+                    border: "1px solid oklch(0.25 0.03 240 / 0.6)",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {player.hand.length} cartas
+                </span>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Defend button overlay when under attack */}
         {isUnderAttack && !faceDown && defenseCards.length > 0 && (
