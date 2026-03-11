@@ -238,72 +238,142 @@ export default function StartScreen({
 
   return (
     <div className="min-h-screen flex flex-col items-center relative overflow-hidden">
-      {/* Battle background */}
+      {/* New spectacular home background */}
       <img
-        src="/assets/generated/battle-background.dim_1920x1080.jpg"
+        src="/assets/generated/home-screen-bg.dim_1920x1080.jpg"
         alt=""
         className="absolute inset-0 w-full h-full object-cover pointer-events-none z-0"
-        style={{ opacity: 0.18 }}
+        style={{ opacity: 0.55 }}
         aria-hidden="true"
       />
-      <div className="absolute inset-0 circuit-bg pointer-events-none z-0" />
+      {/* Dark vignette overlay */}
+      <div
+        className="absolute inset-0 pointer-events-none z-0"
+        style={{
+          background:
+            "radial-gradient(ellipse at center top, transparent 30%, oklch(0.04 0.02 240 / 0.75) 100%)",
+        }}
+      />
+      <div
+        className="absolute inset-0 circuit-bg pointer-events-none z-0"
+        style={{ opacity: 0.3 }}
+      />
 
-      {/* Ambient glow */}
-      <div className="absolute top-1/4 left-1/4 w-64 h-64 rounded-full bg-primary/5 blur-3xl pointer-events-none z-0" />
-      <div className="absolute bottom-1/4 right-1/4 w-48 h-48 rounded-full bg-blue-500/5 blur-3xl pointer-events-none z-0" />
+      {/* Ambient glow blobs */}
+      <div className="absolute top-0 left-1/4 w-96 h-48 rounded-full bg-primary/10 blur-3xl pointer-events-none z-0" />
+      <div className="absolute top-1/3 right-0 w-72 h-72 rounded-full bg-blue-500/8 blur-3xl pointer-events-none z-0" />
 
       <div className="relative z-10 w-full max-w-2xl px-4 py-6 flex flex-col items-center">
-        {/* Logo */}
-        <div className="mb-6 w-full animate-float-in">
-          {/* Hero banner image - full width with overlay */}
+        {/* Logo / Hero Banner */}
+        <div className="mb-5 w-full animate-float-in">
+          {/* Full-width hero showcase banner */}
           <div
-            className="relative w-full rounded-2xl overflow-hidden mb-4 shadow-2xl"
+            className="relative w-full rounded-2xl overflow-hidden mb-4"
             style={{
               boxShadow:
-                "0 0 40px oklch(0.75 0.25 145 / 0.3), 0 0 80px oklch(0.72 0.22 230 / 0.2)",
+                "0 0 60px oklch(0.75 0.25 145 / 0.4), 0 0 120px oklch(0.72 0.22 230 / 0.25), inset 0 0 0 1px oklch(0.75 0.25 145 / 0.2)",
+              minHeight: 200,
             }}
           >
-            <img
-              src="/assets/generated/hero-banner-home.dim_1200x600.jpg"
-              alt="Ciber-Guardianes de Chile"
-              className="w-full object-cover"
-              style={{
-                maxHeight: 260,
-                minHeight: 160,
-                objectPosition: "center top",
-              }}
-            />
-            {/* Gradient overlay at bottom for text readability */}
+            {/* Background: deep navy cyberpunk gradient */}
             <div
               className="absolute inset-0"
               style={{
                 background:
-                  "linear-gradient(to bottom, transparent 40%, oklch(0.08 0.02 240 / 0.9) 100%)",
+                  "linear-gradient(135deg, oklch(0.08 0.05 250) 0%, oklch(0.04 0.03 240) 100%)",
+                border: "1px solid oklch(0.25 0.08 230 / 0.5)",
               }}
             />
-            {/* Title overlay */}
-            <div className="absolute bottom-0 left-0 right-0 p-4 text-center">
+
+            {/* Glowing hex grid decoration */}
+            <div
+              className="absolute inset-0 opacity-20"
+              style={{
+                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='70' viewBox='0 0 40 70'%3E%3Cpolygon points='20,0 40,10 40,30 20,40 0,30 0,10' fill='none' stroke='%2300ffcc' stroke-width='1'/%3E%3Cpolygon points='20,35 40,45 40,65 20,75 0,65 0,45' fill='none' stroke='%230088ff' stroke-width='0.5'/%3E%3C/svg%3E")`,
+                backgroundSize: "40px 70px",
+              }}
+            />
+
+            {/* Corner circuit accents */}
+            <div
+              className="absolute top-0 left-0 w-20 h-20 pointer-events-none opacity-30"
+              style={{
+                background:
+                  "radial-gradient(circle at top left, oklch(0.75 0.25 145 / 0.4) 0%, transparent 70%)",
+              }}
+            />
+            <div
+              className="absolute bottom-0 right-0 w-20 h-20 pointer-events-none opacity-30"
+              style={{
+                background:
+                  "radial-gradient(circle at bottom right, oklch(0.72 0.22 230 / 0.4) 0%, transparent 70%)",
+              }}
+            />
+
+            {/* Title at top */}
+            <div className="relative z-10 pt-5 pb-3 text-center px-4">
               <h1
-                className="text-2xl md:text-4xl font-black font-display tracking-tight neon-text-green"
+                className="text-3xl md:text-5xl font-black font-display tracking-tight"
                 style={{
                   letterSpacing: "-0.02em",
-                  textShadow:
-                    "0 0 30px oklch(0.75 0.25 145), 0 0 60px oklch(0.75 0.25 145 / 0.5)",
+                  background:
+                    "linear-gradient(135deg, oklch(0.9 0.25 145) 0%, oklch(0.75 0.22 230) 50%, oklch(0.85 0.25 145) 100%)",
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                  backgroundClip: "text",
+                  textShadow: "none",
+                  filter: "drop-shadow(0 0 20px oklch(0.75 0.25 145 / 0.6))",
                 }}
               >
                 CIBER-GUARDIANES
               </h1>
               <p
-                className="text-sm md:text-base font-display font-bold tracking-[0.3em] uppercase mt-1"
+                className="text-sm md:text-base font-display font-black tracking-[0.5em] uppercase mt-1"
                 style={{
                   color: "oklch(0.72 0.22 230)",
-                  textShadow: "0 0 15px oklch(0.72 0.22 230)",
+                  textShadow:
+                    "0 0 20px oklch(0.72 0.22 230), 0 0 40px oklch(0.72 0.22 230 / 0.5)",
                 }}
               >
-                de Chile
+                ✦ de Chile ✦
               </p>
             </div>
+
+            {/* Heroes scene — full illustration, no card frames */}
+            <div
+              className="relative z-10 w-full overflow-hidden"
+              style={{ minHeight: 160 }}
+            >
+              <img
+                src="/assets/generated/heroes-banner-scene.dim_1200x400.png"
+                alt="Los 4 Héroes Ciber-Guardianes"
+                className="w-full object-cover object-center"
+                style={{
+                  height: 180,
+                  objectPosition: "center 20%",
+                  filter: "drop-shadow(0 0 24px oklch(0.75 0.25 145 / 0.4))",
+                }}
+              />
+              {/* Bottom fade so it blends with the banner */}
+              <div
+                className="absolute inset-x-0 bottom-0 h-12 pointer-events-none"
+                style={{
+                  background:
+                    "linear-gradient(to top, oklch(0.06 0.04 240), transparent)",
+                }}
+              />
+            </div>
+
+            {/* Decorative scanline */}
+            <div
+              className="absolute inset-x-0 bottom-0 h-px"
+              style={{
+                background:
+                  "linear-gradient(90deg, transparent, oklch(0.75 0.25 145 / 0.8), oklch(0.72 0.22 230 / 0.8), transparent)",
+              }}
+            />
           </div>
+
           {/* Subtitle line */}
           <div className="flex items-center justify-center gap-2">
             <div className="h-px flex-1 max-w-[80px] bg-gradient-to-r from-transparent to-primary/50" />
@@ -388,10 +458,16 @@ export default function StartScreen({
                     >
                       Nivel {level}
                     </span>
-                    <span className="text-[10px] text-muted-foreground">
+                    <span
+                      className="text-[10px] font-medium"
+                      style={{ color: "oklch(0.78 0.08 240)" }}
+                    >
                       {LEVEL_LABELS[level]}
                     </span>
-                    <span className="text-[9px] text-muted-foreground">
+                    <span
+                      className="text-[9px] font-mono"
+                      style={{ color: "oklch(0.72 0.10 200)" }}
+                    >
                       {LEVEL_ROUNDS[level]} rondas
                     </span>
                   </button>

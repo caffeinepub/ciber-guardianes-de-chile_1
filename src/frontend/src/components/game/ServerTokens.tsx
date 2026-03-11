@@ -7,7 +7,7 @@ import type { ServerToken } from "../../game/gameTypes";
 
 interface ServerTokensProps {
   servers: ServerToken[];
-  size?: "sm" | "md";
+  size?: "sm" | "md" | "opponent";
   label?: boolean;
 }
 
@@ -25,7 +25,11 @@ export default function ServerTokens({
       )}
       <div className="flex gap-1 items-end">
         {servers.map((server) => (
-          <ServerBlock key={server.index} server={server} size={size} />
+          <ServerBlock
+            key={server.index}
+            server={server}
+            size={size as "sm" | "md" | "opponent"}
+          />
         ))}
       </div>
     </div>
@@ -37,7 +41,7 @@ function ServerBlock({
   size,
 }: {
   server: ServerToken;
-  size: "sm" | "md";
+  size: "sm" | "md" | "opponent";
 }) {
   const [exploding, setExploding] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -62,11 +66,11 @@ function ServerBlock({
   }, [server.status, prevStatus]);
 
   // Dimensions
-  const w = size === "sm" ? 28 : 40;
-  const h = size === "sm" ? 38 : 54;
+  const w = size === "sm" ? 28 : size === "opponent" ? 34 : 40;
+  const h = size === "sm" ? 38 : size === "opponent" ? 48 : 54;
   const labelText = `SRV-${server.index + 1}`;
   const labelStyle: React.CSSProperties = {
-    fontSize: size === "sm" ? 6 : 7,
+    fontSize: size === "sm" ? 6 : size === "opponent" ? 6.5 : 7,
     letterSpacing: "0.05em",
     fontFamily: "monospace",
   };

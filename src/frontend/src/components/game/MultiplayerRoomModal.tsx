@@ -17,12 +17,15 @@ import {
   Loader2,
   LogIn,
   PlayCircle,
+  RefreshCw,
+  Scan,
   Users,
   Wifi,
   WifiOff,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import QRCode from "qrcode";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RoomState } from "../../hooks/useMultiplayerRoom";
 import { useMultiplayerRoom } from "../../hooks/useMultiplayerRoom";
 
@@ -52,15 +55,27 @@ function getPlayerColor(index: number): string {
   return colors[index % colors.length];
 }
 
-// ── QR Code image component ──────────────────────────────────────────────────
-// Uses the qr-server.com API — no external npm package required.
+// ── QR Code component ─────────────────────────────────────────────────────────
 function QRCodeImage({ url }: { url: string }) {
-  const [loaded, setLoaded] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const SIZE = 180;
   const [error, setError] = useState(false);
 
-  const qrSrc = url
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(url)}&bgcolor=ffffff&color=000000&margin=4`
-    : "";
+  useEffect(() => {
+    if (!url || !canvasRef.current) return;
+    setError(false);
+    QRCode.toCanvas(canvasRef.current, url, {
+      width: SIZE,
+      margin: 1,
+      color: {
+        dark: "#000000",
+        light: "#ffffff",
+      },
+      errorCorrectionLevel: "M",
+    }).catch(() => {
+      setError(true);
+    });
+  }, [url]);
 
   if (!url) {
     return (
@@ -72,47 +87,58 @@ function QRCodeImage({ url }: { url: string }) {
 
   if (error) {
     return (
-      <div
-        className="w-[180px] h-[180px] flex items-center justify-center rounded-lg bg-white text-center p-3"
-        style={{ color: "#000" }}
-      >
-        <p className="text-[11px] font-mono break-all leading-tight">{url}</p>
+      <div className="w-[180px] h-[180px] flex flex-col items-center justify-center rounded-lg bg-white/10 border border-border gap-2">
+        <Scan className="w-8 h-8 text-muted-foreground/40" />
+        <p className="text-[9px] text-muted-foreground text-center px-2">
+          Usa el enlace para unirte
+        </p>
       </div>
     );
   }
 
   return (
     <div
-      className="relative p-2 rounded-lg"
-      style={{ background: "#fff", display: "inline-block" }}
+      className="relative rounded-xl overflow-hidden"
+      style={{ background: "#ffffff", display: "inline-block", padding: 8 }}
     >
-      {!loaded && (
-        <div className="w-[180px] h-[180px] flex items-center justify-center">
-          <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
-        </div>
-      )}
-      <img
-        src={qrSrc}
-        alt="QR Code para unirse"
-        width={180}
-        height={180}
-        style={{ display: loaded ? "block" : "none" }}
-        onLoad={() => setLoaded(true)}
-        onError={() => setError(true)}
+      <canvas
+        ref={canvasRef}
+        width={SIZE}
+        height={SIZE}
+        style={{ display: "block", imageRendering: "pixelated" }}
       />
       {/* Scan line animation */}
-      {loaded && (
-        <div
-          className="absolute left-2 right-2 pointer-events-none"
-          style={{
-            height: 2,
-            background:
-              "linear-gradient(90deg, transparent, oklch(0.75 0.25 145), transparent)",
-            animation: "qr-scan 2.5s ease-in-out infinite",
-            boxShadow: "0 0 8px oklch(0.75 0.25 145)",
-          }}
-        />
-      )}
+      <div
+        className="absolute left-2 right-2 pointer-events-none"
+        style={{
+          height: 2,
+          top: 8,
+          background:
+            "linear-gradient(90deg, transparent, oklch(0.55 0.22 145), transparent)",
+          animation: "qr-scan 2.5s ease-in-out infinite",
+          boxShadow: "0 0 8px oklch(0.55 0.22 145)",
+        }}
+      />
+      {/* Corner markers */}
+      <div
+        className="absolute top-1 left-1 w-5 h-5 border-l-2 border-t-2 pointer-events-none"
+        style={{ borderColor: "oklch(0.55 0.22 145)" }}
+      />
+      <div
+        className="absolute top-1 right-1 w-5 h-5 border-r-2 border-t-2 pointer-events-none"
+        style={{ borderColor: "oklch(0.55 0.22 145)" }}
+      />
+      <div
+        className="absolute bottom-1 left-1 w-5 h-5 border-l-2 border-b-2 pointer-events-none"
+        style={{ borderColor: "oklch(0.55 0.22 145)" }}
+      />
+      <div
+        className="absolute bottom-1 right-1 w-5 h-5 border-r-2 border-b-2 pointer-events-none"
+        style={{ borderColor: "oklch(0.55 0.22 145)" }}
+      />
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 hover:opacity-100 transition-opacity bg-black/40 rounded-xl">
+        <Scan className="w-8 h-8 text-white" />
+      </div>
     </div>
   );
 }
@@ -212,6 +238,10 @@ export default function MultiplayerRoomModal({
     myPlayerId,
     isHost,
     isActorReady,
+    isActorError,
+    actorError,
+    isFetchingActor,
+    reconnect,
     createRoom,
     joinRoom,
     leaveRoom,
@@ -232,13 +262,13 @@ export default function MultiplayerRoomModal({
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
   const [liveRoom, setLiveRoom] = useState<RoomState | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
 
   // Sync external room changes into liveRoom and detect game start
   useEffect(() => {
     if (room) {
       setLiveRoom(room);
       if (room.status === "starting" && onStartMultiplayerGame) {
-        // Calculate this device's player index
         const localIdx = room.players.findIndex((p) => p.id === myPlayerId);
         const myDisplayName = joinName.trim() || hostName.trim() || "Jugador";
         onStartMultiplayerGame(
@@ -298,8 +328,20 @@ export default function MultiplayerRoomModal({
     setTimeout(() => setCopied(null), 1500);
   }, [joinUrl]);
 
+  const handleReconnect = useCallback(async () => {
+    setIsReconnecting(true);
+    setCreateError("");
+    reconnect();
+    // Give time for the reconnect to work
+    await new Promise((r) => setTimeout(r, 3000));
+    setIsReconnecting(false);
+  }, [reconnect]);
+
   const handleCreateRoom = useCallback(async () => {
-    if (!isActorReady) return;
+    if (!isActorReady) {
+      setCreateError("Esperando conexión con el servidor. Intenta reconectar.");
+      return;
+    }
     setIsLoading(true);
     setCreateError("");
     try {
@@ -310,7 +352,7 @@ export default function MultiplayerRoomModal({
         setView("lobby");
       } else {
         setCreateError(
-          "No se pudo crear la sala. Verifica tu conexión e inténtalo de nuevo.",
+          "No se pudo crear la sala. El servidor puede estar ocupado, intenta de nuevo.",
         );
       }
     } finally {
@@ -324,21 +366,31 @@ export default function MultiplayerRoomModal({
       setJoinError("Código debe tener 6 caracteres");
       return;
     }
+    if (!isActorReady) {
+      setJoinError("No hay conexión con el servidor. Reconecta e inténtalo.");
+      return;
+    }
     const playerName = joinName.trim() || "Jugador";
     setIsLoading(true);
     try {
       const result = await joinRoom(code, playerName);
       if (!result) {
-        setJoinError("Sala no encontrada o llena. Verifica el código.");
+        setJoinError(
+          "Sala no encontrada, ya está llena o el código es incorrecto.",
+        );
         return;
       }
       setJoinError("");
       setLiveRoom(result);
       setView("waiting");
+    } catch {
+      setJoinError(
+        "Error de conexión. Verifica tu internet e inténtalo de nuevo.",
+      );
     } finally {
       setIsLoading(false);
     }
-  }, [joinCode, joinName, joinRoom]);
+  }, [joinCode, joinName, joinRoom, isActorReady]);
 
   const handleStartGame = useCallback(async () => {
     if (!liveRoom || !isHost) return;
@@ -346,7 +398,6 @@ export default function MultiplayerRoomModal({
     try {
       await startGame();
       if (onStartMultiplayerGame) {
-        // Host is always the first player (index 0)
         const localIdx = liveRoom.players.findIndex((p) => p.id === myPlayerId);
         const myDisplayName = hostName.trim() || "Anfitrión";
         onStartMultiplayerGame(
@@ -384,6 +435,69 @@ export default function MultiplayerRoomModal({
   }, [leaveRoom]);
 
   const canStart = (liveRoom?.players.length ?? 0) >= 2;
+
+  // Connection status banner
+  const renderConnectionStatus = () => {
+    if (isFetchingActor || isReconnecting) {
+      return (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-yellow-500/30 bg-yellow-500/5">
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-yellow-400" />
+          <p className="text-[11px] text-yellow-400">
+            {isReconnecting ? "Reconectando..." : "Conectando al servidor..."}
+          </p>
+        </div>
+      );
+    }
+    if (isActorError || (!isActorReady && !isFetchingActor)) {
+      return (
+        <div
+          className="flex items-center gap-2 px-3 py-2 rounded-lg border border-red-500/40 bg-red-500/5"
+          data-ocid="multiplayer.connection_error_state"
+        >
+          <WifiOff className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
+          <p className="text-[11px] text-red-400 flex-1">
+            Sin conexión al servidor
+          </p>
+          <button
+            type="button"
+            onClick={handleReconnect}
+            className="flex items-center gap-1 text-[10px] text-yellow-400 hover:text-yellow-300 transition-colors font-bold"
+            data-ocid="multiplayer.reconnect_button"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Reconectar
+          </button>
+        </div>
+      );
+    }
+    if (actorError) {
+      return (
+        <div
+          className="flex items-center gap-2 px-3 py-2 rounded-lg border border-yellow-500/30 bg-yellow-500/5"
+          data-ocid="multiplayer.connection_warning_state"
+        >
+          <WifiOff className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0" />
+          <p className="text-[11px] text-yellow-400 flex-1">{actorError}</p>
+          <button
+            type="button"
+            onClick={handleReconnect}
+            className="flex items-center gap-1 text-[10px] text-yellow-400 hover:text-yellow-300 transition-colors font-bold"
+            data-ocid="multiplayer.reconnect_button"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Reintentar
+          </button>
+        </div>
+      );
+    }
+    // Connected OK
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-green-500/20 bg-green-500/5">
+        <Wifi className="w-3.5 h-3.5 text-green-400" />
+        <p className="text-[11px] text-green-400">Conectado al servidor</p>
+      </div>
+    );
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -506,38 +620,67 @@ export default function MultiplayerRoomModal({
                 </div>
               </div>
 
+              {/* Connection status */}
+              {renderConnectionStatus()}
+
               <Button
                 size="lg"
                 onClick={handleCreateRoom}
-                disabled={isLoading || !isActorReady}
+                disabled={isLoading || !isActorReady || isReconnecting}
                 className="w-full h-12 rounded-xl font-bold text-sm gap-2"
                 style={{
-                  background: "oklch(0.75 0.25 145)",
+                  background:
+                    isActorReady && !isReconnecting
+                      ? "oklch(0.75 0.25 145)"
+                      : "oklch(0.35 0.05 240)",
                   color: "oklch(0.08 0.02 240)",
                 }}
                 data-ocid="multiplayer.create_room_button"
               >
-                {isLoading ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : !isActorReady ? (
+                {isLoading || isFetchingActor || isReconnecting ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
                 ) : (
                   <PlayCircle className="w-5 h-5" />
                 )}
                 {isLoading
                   ? "Creando sala..."
-                  : !isActorReady
+                  : isFetchingActor || isReconnecting
                     ? "Conectando..."
-                    : "Crear Sala"}
+                    : !isActorReady
+                      ? "Sin conexión"
+                      : "Crear Sala"}
               </Button>
 
               {createError && (
-                <p
-                  className="text-[11px] text-destructive text-center mt-1"
+                <div
+                  className="flex flex-col gap-1.5"
                   data-ocid="multiplayer.create_error_state"
                 >
-                  {createError}
-                </p>
+                  <p className="text-[11px] text-destructive text-center">
+                    {createError}
+                  </p>
+                  <div className="flex items-center justify-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleCreateRoom}
+                      className="flex items-center justify-center gap-1.5 text-[10px] text-primary hover:text-primary/80 transition-colors"
+                      data-ocid="multiplayer.retry_create_button"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      Reintentar
+                    </button>
+                    <span className="text-muted-foreground text-[10px]">·</span>
+                    <button
+                      type="button"
+                      onClick={() => window.location.reload()}
+                      className="flex items-center justify-center gap-1.5 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+                      data-ocid="multiplayer.reload_button"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      Recargar página
+                    </button>
+                  </div>
+                </div>
               )}
 
               <div className="relative flex items-center gap-2">
@@ -716,7 +859,6 @@ export default function MultiplayerRoomModal({
                 </div>
               )}
 
-              {/* Info note */}
               <p className="text-[9px] text-muted-foreground text-center leading-relaxed">
                 📱 Comparte el código o el QR — funciona desde cualquier
                 dispositivo
@@ -784,10 +926,13 @@ export default function MultiplayerRoomModal({
                 )}
               </div>
 
+              {/* Connection status for join view */}
+              {renderConnectionStatus()}
+
               <Button
                 size="lg"
                 onClick={handleJoinRoom}
-                disabled={joinCode.length !== 6 || isLoading}
+                disabled={joinCode.length !== 6 || isLoading || !isActorReady}
                 className="w-full h-12 rounded-xl font-bold text-sm gap-2"
                 style={{
                   background: "oklch(0.72 0.22 230)",

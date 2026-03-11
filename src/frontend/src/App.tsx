@@ -278,6 +278,7 @@ export default function App() {
           gameState={finalGameState}
           onPlayAgain={handlePlayAgain}
           onHome={handleHome}
+          localPlayerIndex={localPlayerIndex}
         />
       )}
 

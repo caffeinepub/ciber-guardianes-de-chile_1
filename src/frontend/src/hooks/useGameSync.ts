@@ -2,9 +2,9 @@
 // Manages cross-device game action relay for multiplayer sessions.
 //
 // PROTOCOL:
-//   1. When it's your turn and you take a game action, call publishAction().
+//   1. When you take a game action, call publishAction().
 //      This encodes the action in your player name via leaveRoom + joinRoom.
-//   2. Other devices poll getRoomState (1.5s) and detect the "||" separator in
+//   2. Other devices poll getRoomState (1.2s) and detect the "||" separator in
 //      player names, extract the action, and dispatch it locally.
 //   3. After 2.5s, the publisher cleans their name (removes the action payload).
 //
@@ -41,8 +41,9 @@ interface UseGameSyncOptions {
   enabled: boolean;
 }
 
-const CLEAN_DELAY_MS = 2500; // how long action stays in name before cleanup
-const POLL_INTERVAL_MS = 1200;
+const CLEAN_DELAY_MS = 12000; // how long action stays in name before cleanup — longer so polling has multiple chances to catch it
+const POLL_INTERVAL_MS = 400; // faster poll to catch actions sooner
+const REJOIN_DELAY_MS = 500; // delay between leave and rejoin to avoid backend race
 
 export function useGameSync({
   roomCode,
@@ -76,10 +77,44 @@ export function useGameSync({
   const roomCodeRef = useRef(roomCode);
   roomCodeRef.current = roomCode;
 
+  // Helper: leave room then rejoin with a specific name, with retry and backoff
+  const leaveAndRejoin = useCallback(
+    async (
+      code: string,
+      playerId: string,
+      newName: string,
+      retries = 4,
+    ): Promise<boolean> => {
+      if (!actor) return false;
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          // Leave first
+          await actor.leaveRoom(code, playerId);
+          // Delay so backend processes the leave before the join
+          await new Promise((r) => setTimeout(r, REJOIN_DELAY_MS));
+          // Rejoin with updated name
+          const result = await actor.joinRoom(code, playerId, newName);
+          if (result) return true;
+        } catch {
+          // retry
+        }
+        if (attempt < retries) {
+          // Exponential backoff: 400ms, 800ms, 1200ms, 1600ms
+          await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+        }
+      }
+      return false;
+    },
+    [actor],
+  );
+
   // Publish a game action so other devices can consume it
   const publishAction = useCallback(
     async (action: RelayAction): Promise<void> => {
       if (!actor || !roomCode) return;
+
+      // Small pre-publish delay to let local game state settle first
+      await new Promise((r) => setTimeout(r, 100));
 
       const seq = ++outSeqRef.current;
       const encodedName = encodePlayerNameWithAction(
@@ -90,33 +125,72 @@ export function useGameSync({
       );
 
       setIsSyncing(true);
+      let published = false;
       try {
-        // Leave then rejoin with the action encoded in the name
-        await actor.leaveRoom(roomCode, myPlayerId);
-        await actor.joinRoom(roomCode, myPlayerId, encodedName);
-      } catch {
-        // Best-effort — other devices will still get state from the action
+        published = await leaveAndRejoin(roomCode, myPlayerId, encodedName);
       } finally {
         setIsSyncing(false);
       }
 
-      // Schedule name cleanup after delay
+      // Verify the action was written — poll once to confirm our name has the seq number
+      // If verification fails, retry publishing once more
+      if (published) {
+        let verified = false;
+        const verifyStart = Date.now();
+        while (!verified && Date.now() - verifyStart < 3000) {
+          await new Promise((r) => setTimeout(r, 400));
+          try {
+            const canisterRoom = await (actor as backendInterface).getRoomState(
+              roomCode,
+            );
+            if (canisterRoom) {
+              const myPlayer = canisterRoom.players.find(
+                (p) => p.id === myPlayerId,
+              );
+              if (myPlayer) {
+                const extracted = extractActionFromName(myPlayer.name);
+                if (extracted && extracted.seq === seq) {
+                  verified = true;
+                }
+              }
+            }
+          } catch {
+            // ignore verification errors
+          }
+        }
+        // If not verified, attempt one more publish with increased delay
+        if (!verified) {
+          console.warn(
+            `[sync] seq ${seq} not verified in canister, retrying publish...`,
+          );
+          await new Promise((r) => setTimeout(r, 200));
+          try {
+            await leaveAndRejoin(roomCode, myPlayerId, encodedName, 2);
+          } catch {
+            // best-effort retry
+          }
+        }
+      }
+
+      // Schedule name cleanup after delay — keep action in name long enough for
+      // multiple polls to catch it (CLEAN_DELAY_MS = 8000ms, POLL_INTERVAL_MS = 600ms
+      // means ~13 poll attempts before cleanup)
       if (cleanupTimerRef.current) clearTimeout(cleanupTimerRef.current);
       cleanupTimerRef.current = setTimeout(async () => {
-        if (!actor || !roomCodeRef.current) return;
+        const code = roomCodeRef.current;
+        if (!actor || !code) return;
         const cleanName = encodePlayerName(
           displayNameRef.current,
           heroIdRef.current,
         );
         try {
-          await actor.leaveRoom(roomCodeRef.current, myPlayerId);
-          await actor.joinRoom(roomCodeRef.current, myPlayerId, cleanName);
+          await leaveAndRejoin(code, myPlayerId, cleanName);
         } catch {
           // best-effort cleanup
         }
       }, CLEAN_DELAY_MS);
     },
-    [actor, roomCode, myPlayerId],
+    [actor, roomCode, myPlayerId, leaveAndRejoin],
   );
 
   // Update hero id in canister name (called when hero is selected)
@@ -126,13 +200,12 @@ export function useGameSync({
       heroIdRef.current = heroId;
       const cleanName = encodePlayerName(displayNameRef.current, heroId);
       try {
-        await actor.leaveRoom(roomCode, myPlayerId);
-        await actor.joinRoom(roomCode, myPlayerId, cleanName);
+        await leaveAndRejoin(roomCode, myPlayerId, cleanName);
       } catch {
         // best-effort
       }
     },
-    [actor, roomCode, myPlayerId],
+    [actor, roomCode, myPlayerId, leaveAndRejoin],
   );
 
   // Poll for remote actions from other players
@@ -175,6 +248,12 @@ export function useGameSync({
               seq,
               action,
             });
+          } else if (seq === lastApplied) {
+            // Same seq seen again — already applied, just log for debugging
+            // (This is expected because CLEAN_DELAY_MS is long and polling continues)
+            console.debug(
+              `[sync] seq ${seq} from ${p.id} already applied, skipping`,
+            );
           }
 
           // Keep heroId info accessible (via decodePlayerName for the hero selection sync)

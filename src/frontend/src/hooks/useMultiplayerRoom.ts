@@ -30,8 +30,9 @@ export type RoomState = {
   createdAt: number;
 };
 
-const POLL_INTERVAL = 1500;
+const POLL_INTERVAL = 1000;
 const CHANNEL_NAME = "cgc-rooms";
+const REJOIN_DELAY_MS = 350; // delay between leave and rejoin for backend processing
 
 function generateRoomCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -85,15 +86,27 @@ function broadcastRoomUpdate(room: RoomState): void {
 }
 
 export function useMultiplayerRoom() {
-  const { actor } = useActor();
+  const { actor, isFetching, isError, reconnect } = useActor();
   const [room, setRoom] = useState<RoomState | null>(null);
   const [myPlayerId] = useState(getMyPlayerId);
   const [roomCodeFromUrl, setRoomCodeFromUrl] = useState<string | null>(null);
   const [myDisplayName, setMyDisplayName] = useState("Jugador");
   const [myHeroId, setMyHeroIdState] = useState("");
+  const [actorError, setActorError] = useState<string | null>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const roomCodeRef = useRef<string | null>(null);
+
+  // Reflect actor error state
+  useEffect(() => {
+    if (isError) {
+      setActorError(
+        "No se pudo conectar al servidor. Verifica tu conexión e intenta reconectar.",
+      );
+    } else if (actor) {
+      setActorError(null);
+    }
+  }, [isError, actor]);
 
   // Keep roomCodeRef in sync
   useEffect(() => {
@@ -170,6 +183,34 @@ export function useMultiplayerRoom() {
     };
   }, [room?.code, actor]);
 
+  // Helper: leave room then rejoin with a new name, with delay to avoid backend race
+  const leaveAndRejoin = useCallback(
+    async (
+      code: string,
+      playerId: string,
+      newName: string,
+      retries = 2,
+    ): Promise<boolean> => {
+      if (!actor) return false;
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          await actor.leaveRoom(code, playerId);
+          // Wait for backend to process the leave before rejoining
+          await new Promise((r) => setTimeout(r, REJOIN_DELAY_MS));
+          const result = await actor.joinRoom(code, playerId, newName);
+          if (result) return true;
+        } catch {
+          // retry
+        }
+        if (attempt < retries) {
+          await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+        }
+      }
+      return false;
+    },
+    [actor],
+  );
+
   const createRoom = useCallback(
     async (
       maxPlayers: 2 | 3 | 4,
@@ -182,22 +223,34 @@ export function useMultiplayerRoom() {
       setMyDisplayName(hostName);
       // Encode hero as empty until hero selection happens
       const encodedName = encodePlayerName(hostName, "");
-      try {
-        const canisterRoom = await actor.createRoom(
-          code,
-          myPlayerId,
-          encodedName,
-          BigInt(maxPlayers),
-          BigInt(level),
-        );
-        const newRoom = toRoomState(canisterRoom);
-        broadcastRoomUpdate(newRoom);
-        setRoom(newRoom);
-        return newRoom;
-      } catch (e) {
-        console.error("createRoom failed:", e);
-        return null;
+      // Retry up to 4 times with increasing delay
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          if (attempt > 0) {
+            await new Promise((r) => setTimeout(r, 800 * attempt));
+          }
+          const canisterRoom = await actor.createRoom(
+            code,
+            myPlayerId,
+            encodedName,
+            BigInt(maxPlayers),
+            BigInt(level),
+          );
+          const newRoom = toRoomState(canisterRoom);
+          broadcastRoomUpdate(newRoom);
+          setRoom(newRoom);
+          setActorError(null);
+          return newRoom;
+        } catch (e) {
+          console.error(`createRoom attempt ${attempt + 1} failed:`, e);
+          if (attempt === 3) {
+            setActorError(
+              "No se pudo crear la sala. Revisa tu conexión e inténtalo de nuevo.",
+            );
+          }
+        }
       }
+      return null;
     },
     [actor, myPlayerId],
   );
@@ -208,20 +261,28 @@ export function useMultiplayerRoom() {
       const displayName = playerName ?? "Jugador";
       setMyDisplayName(displayName);
       const encodedName = encodePlayerName(displayName, "");
-      try {
-        const canisterRoom = await actor.joinRoom(
-          code.toUpperCase(),
-          myPlayerId,
-          encodedName,
-        );
-        if (!canisterRoom) return null;
-        const joined = toRoomState(canisterRoom);
-        broadcastRoomUpdate(joined);
-        setRoom(joined);
-        return joined;
-      } catch {
-        return null;
+      // Retry up to 4 times
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          if (attempt > 0) {
+            await new Promise((r) => setTimeout(r, 800 * attempt));
+          }
+          const canisterRoom = await actor.joinRoom(
+            code.toUpperCase(),
+            myPlayerId,
+            encodedName,
+          );
+          if (!canisterRoom) return null;
+          const joined = toRoomState(canisterRoom);
+          broadcastRoomUpdate(joined);
+          setRoom(joined);
+          setActorError(null);
+          return joined;
+        } catch (e) {
+          console.error(`joinRoom attempt ${attempt + 1} failed:`, e);
+        }
       }
+      return null;
     },
     [actor, myPlayerId],
   );
@@ -233,13 +294,19 @@ export function useMultiplayerRoom() {
       setMyHeroIdState(heroId);
       const encodedName = encodePlayerName(myDisplayName, heroId);
       try {
-        await actor.leaveRoom(room.code, myPlayerId);
-        await actor.joinRoom(room.code, myPlayerId, encodedName);
+        await leaveAndRejoin(room.code, myPlayerId, encodedName);
+        // Refresh room state after update
+        const updated = await actor.getRoomState(room.code);
+        if (updated) {
+          const newState = toRoomState(updated);
+          setRoom(newState);
+          broadcastRoomUpdate(newState);
+        }
       } catch {
         // best-effort
       }
     },
-    [actor, room, myPlayerId, myDisplayName],
+    [actor, room, myPlayerId, myDisplayName, leaveAndRejoin],
   );
 
   const leaveRoom = useCallback(async () => {
@@ -256,11 +323,23 @@ export function useMultiplayerRoom() {
     if (!room || !actor) return;
     try {
       await actor.startRoom(room.code, myPlayerId);
+      // Poll to confirm the status change
+      let retries = 5;
+      while (retries-- > 0) {
+        await new Promise((r) => setTimeout(r, 500));
+        const canisterRoom = await actor.getRoomState(room.code);
+        if (canisterRoom) {
+          const updated = toRoomState(canisterRoom);
+          broadcastRoomUpdate(updated);
+          setRoom(updated);
+          if (updated.status === "starting") break;
+        }
+      }
+    } catch {
+      // best-effort — set locally anyway so host transitions
       const updated: RoomState = { ...room, status: "starting" };
       broadcastRoomUpdate(updated);
       setRoom(updated);
-    } catch {
-      // best-effort
     }
   }, [room, actor, myPlayerId]);
 
@@ -279,6 +358,7 @@ export function useMultiplayerRoom() {
   }, []);
 
   const isHost = room?.hostId === myPlayerId;
+  // Actor is ready as long as it exists
   const isActorReady = !!actor;
 
   return {
@@ -289,6 +369,10 @@ export function useMultiplayerRoom() {
     roomCodeFromUrl,
     isHost,
     isActorReady,
+    actorError,
+    isFetchingActor: isFetching,
+    isActorError: isError,
+    reconnect,
     createRoom,
     joinRoom,
     setMyHeroId,

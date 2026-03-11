@@ -189,16 +189,16 @@ const GameCard = React.memo(function GameCard({
         borderRadius: size === "sm" ? 6 : 8,
         border: `${dim.borderW}px solid ${cfg.outerBorder}`,
         boxShadow: isSelected
-          ? `0 0 0 2px ${cfg.innerBorder}, 0 0 20px ${cfg.glowColor}, 0 8px 24px rgba(0,0,0,0.8)`
+          ? `0 0 0 3px ${cfg.innerBorder}, 0 0 28px ${cfg.glowColor}, 0 0 50px ${cfg.glowColor.replace("0.6", "0.35")}, 0 8px 28px rgba(0,0,0,0.9)`
           : isPlayable
-            ? `0 0 12px ${cfg.glowColor}, 0 4px 12px rgba(0,0,0,0.6)`
+            ? `0 0 14px ${cfg.glowColor}, 0 4px 14px rgba(0,0,0,0.6)`
             : "0 2px 8px rgba(0,0,0,0.6)",
         background: "#080808",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
         cursor: onClick ? "pointer" : "default",
-        transform: isSelected ? "translateY(-8px) scale(1.04)" : undefined,
+        transform: isSelected ? "translateY(-10px) scale(1.07)" : undefined,
         opacity: !isPlayable && onClick ? 0.8 : 1,
         transition: "transform 0.18s, box-shadow 0.18s, opacity 0.18s",
         position: "relative",
@@ -335,32 +335,32 @@ const GameCard = React.memo(function GameCard({
             }}
           />
         </div>
-        {/* Power badge (villain only) */}
+        {/* Power badge — top-left, TCG standard primary position */}
         {card.power !== undefined && (
           <div
             style={{
               position: "absolute",
               top: 3,
-              right: 3,
-              width: dim.badgeDim,
-              height: dim.badgeDim,
+              left: 3,
+              width: dim.badgeDim + 4,
+              height: dim.badgeDim + 4,
               borderRadius: "50%",
-              background: cfg.badgeBg,
+              background: `radial-gradient(circle, ${cfg.cornerAccent}cc, ${cfg.badgeBg})`,
               border: `2px solid ${cfg.badgeBorder}`,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              boxShadow: `0 0 8px ${cfg.glowColor}`,
+              boxShadow: `0 0 10px ${cfg.glowColor}, inset 0 0 6px rgba(0,0,0,0.5)`,
               zIndex: 5,
             }}
           >
             <span
               style={{
-                fontSize: dim.badgeSize,
+                fontSize: dim.badgeSize + 1,
                 fontWeight: 900,
-                color: cfg.badgeText,
+                color: "#ffffff",
                 lineHeight: 1,
-                textShadow: `0 0 6px ${cfg.glowColor}`,
+                textShadow: `0 0 8px ${cfg.glowColor}, 0 1px 2px rgba(0,0,0,0.9)`,
               }}
             >
               {card.power}

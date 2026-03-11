@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import type { backendInterface } from "../backend";
 import { createActorWithConfig } from "../config";
 import { useInternetIdentity } from "./useInternetIdentity";
@@ -27,11 +27,19 @@ export function useActor() {
       const actor = await createActorWithConfig(actorOptions);
       return actor;
     },
+    // Retry up to 5 times with exponential backoff to handle transient network issues
+    retry: 5,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
     // Only refetch when identity changes
     staleTime: Number.POSITIVE_INFINITY,
-    // This will cause the actor to be recreated when the identity changes
     enabled: true,
   });
+
+  // Expose a manual refetch so components can trigger reconnect
+  const reconnect = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: [ACTOR_QUERY_KEY] });
+    actorQuery.refetch();
+  }, [queryClient, actorQuery]);
 
   // When the actor changes, invalidate dependent queries
   useEffect(() => {
@@ -52,5 +60,7 @@ export function useActor() {
   return {
     actor: actorQuery.data || null,
     isFetching: actorQuery.isFetching,
+    isError: actorQuery.isError,
+    reconnect,
   };
 }
