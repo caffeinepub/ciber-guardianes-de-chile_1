@@ -34,7 +34,7 @@ const POLL_INTERVAL = 1000;
 const CHANNEL_NAME = "cgc-rooms";
 const REJOIN_DELAY_MS = 350; // delay between leave and rejoin for backend processing
 
-function generateRoomCode(): string {
+export function generateRoomCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let code = "";
   for (let i = 0; i < 6; i++) {
@@ -93,9 +93,11 @@ export function useMultiplayerRoom() {
   const [myDisplayName, setMyDisplayName] = useState("Jugador");
   const [myHeroId, setMyHeroIdState] = useState("");
   const [actorError, setActorError] = useState<string | null>(null);
+  const [isWarmedUp, setIsWarmedUp] = useState(false);
   const channelRef = useRef<BroadcastChannel | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const roomCodeRef = useRef<string | null>(null);
+  const warmupAttemptedRef = useRef(false);
 
   // Reflect actor error state
   useEffect(() => {
@@ -107,6 +109,32 @@ export function useMultiplayerRoom() {
       setActorError(null);
     }
   }, [isError, actor]);
+
+  // Warm up the canister as soon as the actor is ready.
+  // ICP canisters have a cold-start delay on first call after deployment.
+  // Firing getTotalGames() preloads the canister so createRoom succeeds immediately.
+  useEffect(() => {
+    if (!actor || warmupAttemptedRef.current) return;
+    warmupAttemptedRef.current = true;
+    const warmup = async () => {
+      // Retry warmup up to 8 times with growing delays to handle cold start
+      for (let attempt = 0; attempt < 8; attempt++) {
+        try {
+          await actor.getTotalGames();
+          setIsWarmedUp(true);
+          return;
+        } catch {
+          // ignore — just warming up
+        }
+        await new Promise((r) =>
+          setTimeout(r, Math.min(1000 * (attempt + 1), 5000)),
+        );
+      }
+      // Even if warmup failed, mark as ready so the user can try manually
+      setIsWarmedUp(true);
+    };
+    warmup();
+  }, [actor]);
 
   // Keep roomCodeRef in sync
   useEffect(() => {
@@ -216,18 +244,21 @@ export function useMultiplayerRoom() {
       maxPlayers: 2 | 3 | 4,
       level: 1 | 2 | 3,
       displayName?: string,
+      providedCode?: string,
     ): Promise<RoomState | null> => {
       if (!actor) return null;
-      const code = generateRoomCode();
+      const code = providedCode ?? generateRoomCode();
       const hostName = displayName ?? "Anfitrión";
       setMyDisplayName(hostName);
       // Encode hero as empty until hero selection happens
       const encodedName = encodePlayerName(hostName, "");
-      // Retry up to 4 times with increasing delay
-      for (let attempt = 0; attempt < 4; attempt++) {
+      // Retry up to 6 times with generous delays (cold-start can take ~10s)
+      for (let attempt = 0; attempt < 6; attempt++) {
         try {
           if (attempt > 0) {
-            await new Promise((r) => setTimeout(r, 800 * attempt));
+            await new Promise((r) =>
+              setTimeout(r, Math.min(1500 * attempt, 5000)),
+            );
           }
           const canisterRoom = await actor.createRoom(
             code,
@@ -243,7 +274,7 @@ export function useMultiplayerRoom() {
           return newRoom;
         } catch (e) {
           console.error(`createRoom attempt ${attempt + 1} failed:`, e);
-          if (attempt === 3) {
+          if (attempt === 5) {
             setActorError(
               "No se pudo crear la sala. Revisa tu conexión e inténtalo de nuevo.",
             );
@@ -261,11 +292,13 @@ export function useMultiplayerRoom() {
       const displayName = playerName ?? "Jugador";
       setMyDisplayName(displayName);
       const encodedName = encodePlayerName(displayName, "");
-      // Retry up to 4 times
-      for (let attempt = 0; attempt < 4; attempt++) {
+      // Retry up to 6 times
+      for (let attempt = 0; attempt < 6; attempt++) {
         try {
           if (attempt > 0) {
-            await new Promise((r) => setTimeout(r, 800 * attempt));
+            await new Promise((r) =>
+              setTimeout(r, Math.min(1500 * attempt, 5000)),
+            );
           }
           const canisterRoom = await actor.joinRoom(
             code.toUpperCase(),
@@ -358,8 +391,8 @@ export function useMultiplayerRoom() {
   }, []);
 
   const isHost = room?.hostId === myPlayerId;
-  // Actor is ready as long as it exists
-  const isActorReady = !!actor;
+  // Actor is ready once both the actor exists and warmup completed
+  const isActorReady = !!actor && isWarmedUp;
 
   return {
     room,
@@ -370,7 +403,7 @@ export function useMultiplayerRoom() {
     isHost,
     isActorReady,
     actorError,
-    isFetchingActor: isFetching,
+    isFetchingActor: isFetching || (!!actor && !isWarmedUp),
     isActorError: isError,
     reconnect,
     createRoom,

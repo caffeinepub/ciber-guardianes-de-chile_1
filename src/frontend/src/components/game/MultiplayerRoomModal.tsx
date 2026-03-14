@@ -24,10 +24,13 @@ import {
   WifiOff,
   X,
 } from "lucide-react";
-import QRCode from "qrcode";
+// QR generation via external QR API (no package needed)
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RoomState } from "../../hooks/useMultiplayerRoom";
-import { useMultiplayerRoom } from "../../hooks/useMultiplayerRoom";
+import {
+  generateRoomCode,
+  useMultiplayerRoom,
+} from "../../hooks/useMultiplayerRoom";
 
 export interface MultiplayerRoomModalProps {
   open: boolean;
@@ -57,26 +60,7 @@ function getPlayerColor(index: number): string {
 
 // ── QR Code component ─────────────────────────────────────────────────────────
 function QRCodeImage({ url }: { url: string }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const SIZE = 180;
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    if (!url || !canvasRef.current) return;
-    setError(false);
-    QRCode.toCanvas(canvasRef.current, url, {
-      width: SIZE,
-      margin: 1,
-      color: {
-        dark: "#000000",
-        light: "#ffffff",
-      },
-      errorCorrectionLevel: "M",
-    }).catch(() => {
-      setError(true);
-    });
-  }, [url]);
-
   if (!url) {
     return (
       <div className="w-[180px] h-[180px] flex items-center justify-center rounded-lg bg-white/10 border border-border">
@@ -84,28 +68,22 @@ function QRCodeImage({ url }: { url: string }) {
       </div>
     );
   }
-
-  if (error) {
-    return (
-      <div className="w-[180px] h-[180px] flex flex-col items-center justify-center rounded-lg bg-white/10 border border-border gap-2">
-        <Scan className="w-8 h-8 text-muted-foreground/40" />
-        <p className="text-[9px] text-muted-foreground text-center px-2">
-          Usa el enlace para unirte
-        </p>
-      </div>
-    );
-  }
-
+  const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${SIZE}x${SIZE}&data=${encodeURIComponent(url)}&bgcolor=ffffff&color=000000&margin=6`;
   return (
     <div
       className="relative rounded-xl overflow-hidden"
       style={{ background: "#ffffff", display: "inline-block", padding: 8 }}
     >
-      <canvas
-        ref={canvasRef}
+      <img
+        src={qrApiUrl}
+        alt="QR para unirse"
         width={SIZE}
         height={SIZE}
         style={{ display: "block", imageRendering: "pixelated" }}
+        onError={(e) => {
+          // Fallback: hide and show text
+          (e.target as HTMLImageElement).style.display = "none";
+        }}
       />
       {/* Scan line animation */}
       <div
@@ -225,7 +203,13 @@ function WaitingSlot({ index }: { index: number }) {
 }
 
 // ── Main modal ───────────────────────────────────────────────────────────────
-type ModalView = "create" | "configure" | "lobby" | "join" | "waiting";
+type ModalView =
+  | "create"
+  | "configure"
+  | "lobby"
+  | "join"
+  | "waiting"
+  | "creating";
 
 export default function MultiplayerRoomModal({
   open,
@@ -263,11 +247,14 @@ export default function MultiplayerRoomModal({
   const [liveRoom, setLiveRoom] = useState<RoomState | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [pendingCode, setPendingCode] = useState<string>("");
 
   // Sync external room changes into liveRoom and detect game start
   useEffect(() => {
     if (room) {
       setLiveRoom(room);
+      // Auto-transition from "creating" to "lobby" once room is confirmed by server
+      setView((prev) => (prev === "creating" ? "lobby" : prev));
       if (room.status === "starting" && onStartMultiplayerGame) {
         const localIdx = room.players.findIndex((p) => p.id === myPlayerId);
         const myDisplayName = joinName.trim() || hostName.trim() || "Jugador";
@@ -301,6 +288,7 @@ export default function MultiplayerRoomModal({
       setLiveRoom(null);
       setHostName("");
       setJoinName("");
+      setPendingCode("");
     }
   }, [open, initialRoomCode]);
 
@@ -312,14 +300,19 @@ export default function MultiplayerRoomModal({
     }
   }, [initialRoomCode, open]);
 
-  const joinUrl = liveRoom ? getJoinUrl(liveRoom.code) : "";
+  const joinUrl = liveRoom
+    ? getJoinUrl(liveRoom.code)
+    : pendingCode
+      ? getJoinUrl(pendingCode)
+      : "";
 
   const handleCopyCode = useCallback(() => {
-    if (!liveRoom) return;
-    navigator.clipboard.writeText(liveRoom.code).catch(() => {});
+    const code = liveRoom?.code || pendingCode;
+    if (!code) return;
+    navigator.clipboard.writeText(code).catch(() => {});
     setCopied("code");
     setTimeout(() => setCopied(null), 1500);
-  }, [liveRoom]);
+  }, [liveRoom, pendingCode]);
 
   const handleCopyLink = useCallback(() => {
     if (!joinUrl) return;
@@ -338,27 +331,26 @@ export default function MultiplayerRoomModal({
   }, [reconnect]);
 
   const handleCreateRoom = useCallback(async () => {
-    if (!isActorReady) {
-      setCreateError("Esperando conexión con el servidor. Intenta reconectar.");
-      return;
-    }
-    setIsLoading(true);
+    const name = hostName.trim() || "Anfitrión";
+    // Generate room code immediately and show QR without waiting for server
+    const generatedCode = generateRoomCode();
+    setPendingCode(generatedCode);
     setCreateError("");
-    try {
-      const name = hostName.trim() || "Anfitrión";
-      const newRoom = await createRoom(maxPlayers, selectedLevel, name);
-      if (newRoom) {
-        setLiveRoom(newRoom);
-        setView("lobby");
-      } else {
-        setCreateError(
-          "No se pudo crear la sala. El servidor puede estar ocupado, intenta de nuevo.",
-        );
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [createRoom, maxPlayers, selectedLevel, hostName, isActorReady]);
+    setView("creating");
+    // Connect to server in background
+    createRoom(maxPlayers, selectedLevel, name, generatedCode).then(
+      (newRoom) => {
+        if (newRoom) {
+          setLiveRoom(newRoom);
+          setView("lobby");
+        } else {
+          setCreateError(
+            "No se pudo registrar la sala en el servidor. El invitado puede reintentar unirse.",
+          );
+        }
+      },
+    );
+  }, [createRoom, maxPlayers, selectedLevel, hostName]);
 
   const handleJoinRoom = useCallback(async () => {
     const code = joinCode.trim().toUpperCase();
@@ -702,6 +694,215 @@ export default function MultiplayerRoomModal({
               </Button>
             </div>
           </>
+        )}
+
+        {/* ── VIEW: CREATING (QR shown immediately, server connecting in background) ── */}
+        {view === "creating" && (
+          <div data-ocid="multiplayer.creating_view">
+            <DialogHeader>
+              <div className="flex items-center justify-between">
+                <DialogTitle className="font-display neon-text-green text-lg">
+                  🎮 Sala Lista – Conectando...
+                </DialogTitle>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleLeave();
+                    setView("create");
+                    setPendingCode("");
+                  }}
+                  className="text-muted-foreground hover:text-destructive transition-colors"
+                  data-ocid="multiplayer.close_room_button"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </DialogHeader>
+
+            <div className="flex flex-col items-center gap-4">
+              {/* QR Code — shown immediately */}
+              <div className="flex flex-col items-center gap-2">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                  Escanea para unirte
+                </p>
+                <QRCodeImage url={getJoinUrl(pendingCode)} />
+              </div>
+
+              {/* Room code — shown immediately */}
+              <div className="flex flex-col items-center gap-1">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                  Código de sala
+                </p>
+                <div className="flex items-center gap-2">
+                  <div
+                    className="px-4 py-2 rounded-xl border-2 font-mono font-black text-2xl tracking-[0.25em]"
+                    style={{
+                      borderColor: "oklch(0.75 0.25 145)",
+                      color: "oklch(0.75 0.25 145)",
+                      background: "oklch(0.75 0.25 145 / 0.06)",
+                      textShadow:
+                        "0 0 15px oklch(0.75 0.25 145), 0 0 30px oklch(0.75 0.25 145 / 0.5)",
+                    }}
+                  >
+                    {pendingCode}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCopyCode}
+                    className="p-2 rounded-lg border border-border text-muted-foreground hover:text-primary hover:border-primary/50 transition-all"
+                    title="Copiar código"
+                    data-ocid="multiplayer.copy_code_button"
+                  >
+                    {copied === "code" ? (
+                      <Check className="w-3.5 h-3.5 text-primary" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Copy link */}
+              <button
+                type="button"
+                onClick={handleCopyLink}
+                className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border border-primary/30 bg-primary/5 hover:bg-primary/10 transition-all group"
+                data-ocid="multiplayer.copy_link_button"
+              >
+                <Link2 className="w-4 h-4 text-primary flex-shrink-0" />
+                <span className="text-[10px] text-muted-foreground font-mono truncate flex-1 text-left">
+                  {getJoinUrl(pendingCode).replace("https://", "")}
+                </span>
+                <span
+                  className="text-[10px] font-bold flex-shrink-0"
+                  style={{ color: "oklch(0.75 0.25 145)" }}
+                >
+                  {copied === "link" ? (
+                    <span className="flex items-center gap-1">
+                      <Check className="w-3 h-3" /> Copiado
+                    </span>
+                  ) : (
+                    "Copiar"
+                  )}
+                </span>
+              </button>
+
+              {/* Server status bar */}
+              {!liveRoom && !createError && (
+                <div
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-yellow-500/30 bg-yellow-500/5"
+                  data-ocid="multiplayer.creating_loading_state"
+                >
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-yellow-400 flex-shrink-0" />
+                  <p className="text-[11px] text-yellow-400">
+                    Registrando sala en el servidor...
+                  </p>
+                </div>
+              )}
+              {liveRoom && !createError && (
+                <div
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-green-500/30 bg-green-500/5"
+                  data-ocid="multiplayer.creating_success_state"
+                >
+                  <Check className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
+                  <p className="text-[11px] text-green-400">
+                    ¡Sala lista! Esperando jugadores...
+                  </p>
+                </div>
+              )}
+              {createError && (
+                <div
+                  className="w-full flex flex-col gap-1.5"
+                  data-ocid="multiplayer.creating_error_state"
+                >
+                  <p className="text-[11px] text-destructive text-center">
+                    {createError}
+                  </p>
+                  <div className="flex items-center justify-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCreateError("");
+                        createRoom(
+                          maxPlayers,
+                          selectedLevel,
+                          hostName.trim() || "Anfitrión",
+                          pendingCode,
+                        ).then((r) => {
+                          if (r) {
+                            setLiveRoom(r);
+                            setView("lobby");
+                          } else
+                            setCreateError(
+                              "No se pudo registrar la sala. Intenta de nuevo.",
+                            );
+                        });
+                      }}
+                      className="flex items-center gap-1.5 text-[10px] text-primary hover:text-primary/80 transition-colors"
+                      data-ocid="multiplayer.retry_create_button"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      Reintentar
+                    </button>
+                    <span className="text-muted-foreground text-[10px]">·</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCreateError("");
+                        setPendingCode("");
+                        setView("create");
+                      }}
+                      className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+                      data-ocid="multiplayer.back_button"
+                    >
+                      ← Volver
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Host player slot */}
+              <div className="w-full">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-2">
+                  Jugadores (1/{maxPlayers})
+                </p>
+                <div className="flex flex-col gap-1.5">
+                  <PlayerRow
+                    name={`${hostName.trim() || "Anfitrión"} (Tú)`}
+                    isHost
+                    isOnline
+                    index={0}
+                  />
+                  {([2, 3, 4] as const).slice(1, maxPlayers).map((slotNum) => (
+                    <WaitingSlot
+                      key={`creating-slot-${slotNum}`}
+                      index={slotNum - 1}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Start button — disabled until server confirms */}
+              <Button
+                size="lg"
+                disabled
+                className="w-full h-12 rounded-xl font-bold text-sm gap-2"
+                style={{
+                  background: "oklch(0.35 0.05 240)",
+                  color: "oklch(0.5 0.05 240)",
+                }}
+                data-ocid="multiplayer.start_game_button"
+              >
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Esperando jugadores...
+              </Button>
+
+              <p className="text-[9px] text-muted-foreground text-center leading-relaxed">
+                📱 El invitado puede escanear el QR ahora — la sala se
+                confirmará en segundos
+              </p>
+            </div>
+          </div>
         )}
 
         {/* ── VIEW: LOBBY (host waiting for players) ── */}

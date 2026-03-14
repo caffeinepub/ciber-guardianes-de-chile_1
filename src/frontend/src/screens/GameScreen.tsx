@@ -105,6 +105,11 @@ function gameReducer(state: GameState, action: Action): GameState {
       if (state.currentPhase !== "play") return state;
       const currentPlayer = getCurrentPlayer(state);
       if (currentPlayer.blockedTurns > 0) return state;
+      // Block action cards while spammed
+      if (currentPlayer.spammedTurns > 0) {
+        const card = currentPlayer.hand[action.index];
+        if (card && card.type === "action") return state;
+      }
       if (state.selectedCardIndex === action.index) {
         return { ...state, selectedCardIndex: null, selectedTargetId: null };
       }
@@ -254,6 +259,8 @@ interface TurnTransitionProps {
   isWaitingForOtherPlayer?: boolean;
   /** Called when local player taps "Empezar mi turno" — triggers DRAW_PHASE via syncDispatch */
   onStartTurn?: () => void;
+  /** If set, auto-start turn after this many ms (for multiplayer per-device) */
+  autoStartMs?: number;
 }
 
 function TurnTransitionOverlay({
@@ -267,12 +274,19 @@ function TurnTransitionOverlay({
   isLocalPlayerNext,
   isWaitingForOtherPlayer = false,
   onStartTurn,
+  autoStartMs,
 }: TurnTransitionProps) {
   // In per-device mode when it's the OTHER player's turn: auto-dismiss fast (0.8s)
   // When it's MY turn (or AI): auto-dismiss slower, waiting for tap
   const autoDelay = isWaitingForOtherPlayer ? 800 : isAI ? 1000 : 0;
   const [countdown, setCountdown] = useState(
-    isAI ? 1 : isWaitingForOtherPlayer ? 0 : 3,
+    isAI
+      ? 1
+      : isWaitingForOtherPlayer
+        ? 0
+        : isMultiplayerSync && isLocalPlayerNext
+          ? 1
+          : 3,
   );
 
   // Auto-dismiss when waiting for another device
@@ -281,6 +295,22 @@ function TurnTransitionOverlay({
     const t = setTimeout(onDone, autoDelay);
     return () => clearTimeout(t);
   }, [isWaitingForOtherPlayer, autoDelay, onDone]);
+
+  // Auto-start turn in multiplayer per-device when it's local player's turn
+  useEffect(() => {
+    if (!autoStartMs || isWaitingForOtherPlayer || !isLocalPlayerNext) return;
+    const t = setTimeout(() => {
+      if (onStartTurn) onStartTurn();
+      onDone();
+    }, autoStartMs);
+    return () => clearTimeout(t);
+  }, [
+    autoStartMs,
+    isWaitingForOtherPlayer,
+    isLocalPlayerNext,
+    onStartTurn,
+    onDone,
+  ]);
 
   useEffect(() => {
     if (isWaitingForOtherPlayer) return; // handled by auto-dismiss above
@@ -703,6 +733,9 @@ export default function GameScreen({
 
   // Mobile log sheet
   const [isLogSheetOpen, setIsLogSheetOpen] = useState(false);
+  const [attackerNotification, setAttackerNotification] = useState<
+    string | null
+  >(null);
 
   // ── Multiplayer sync ──────────────────────────────────────────────────────
   const safeLocalIndexForSync: number =
@@ -952,9 +985,7 @@ export default function GameScreen({
           action.type === "SURRENDER" ||
           action.type === "HERO_ULTIMATE" ||
           action.type === "SABER_CONFIRM" ||
-          action.type === "SABER_SKIP" ||
-          action.type === "SELECT_CARD" ||
-          action.type === "SELECT_TARGET";
+          action.type === "SABER_SKIP";
         if (isMyTurnForDispatch || isDefenseAction || isAlwaysRelayed) {
           // Fire-and-forget
           void publishAction(action as Record<string, unknown>);
@@ -1039,7 +1070,7 @@ export default function GameScreen({
       return;
     }
     if (!isMyTurn) return; // Not our turn, don't trigger
-    if (showTurnTransition) return; // Overlay is visible, let the user dismiss it
+    // Note: we no longer block on showTurnTransition — autoStartMs handles auto-dismiss
     if (drawPhaseTriggeredRef.current) return; // Already triggered for this draw phase
     if (state.screen !== "game") return;
 
@@ -1055,10 +1086,35 @@ export default function GameScreen({
     isPerDevice,
     state.currentPhase,
     isMyTurn,
-    showTurnTransition,
     state.screen,
     syncDispatch,
   ]);
+
+  // ── Attacker notification when defense resolves ──────────────────────────
+  const prevPendingAttackRef = useRef(state.pendingAttack);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional - trigger only on pendingAttack change
+  useEffect(() => {
+    const prev = prevPendingAttackRef.current;
+    prevPendingAttackRef.current = state.pendingAttack;
+    if (!isMultiplayerSync || !isPerDevice) return;
+    if (prev && !state.pendingAttack) {
+      const wasIAttacker =
+        prev.attackingPlayerId === localPlayer.id ||
+        prev.attackingPlayerId === safeLocalIndex;
+      if (wasIAttacker) {
+        const lastLog = state.log[0];
+        let msg = "💥 ¡Daño aplicado! El rival aceptó el daño.";
+        if (
+          lastLog?.message?.includes("bloqueó") ||
+          lastLog?.message?.includes("defendió")
+        ) {
+          msg = "🛡️ ¡Ataque bloqueado! El rival se defendió con éxito.";
+        }
+        setAttackerNotification(msg);
+        setTimeout(() => setAttackerNotification(null), 3500);
+      }
+    }
+  }, [state.pendingAttack]);
 
   // ── AI Turn Logic ────────────────────────────────────────────────────────
   // Always keep a fresh ref to latest state so timeouts never use stale closures.
@@ -1458,7 +1514,7 @@ export default function GameScreen({
               )}
 
             {/* Surrender button — icon-only on mobile */}
-            {(!isPerDevice || isMyTurn) && (
+            {true && (
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button
@@ -1920,75 +1976,90 @@ export default function GameScreen({
       {/* ── Action Toast (mobile only — last log entry as transient popup) ── */}
       <ActionToast entry={state.log[0] ?? null} />
 
-      {/* ── Mobile sticky bottom action bar ── */}
-      {!showTurnTransition && !state.pendingAttack && (
+      {/* ── Attacker notification overlay (shows when defense resolves) ── */}
+      {attackerNotification && (
         <div
-          className="sm:hidden fixed bottom-0 left-0 right-0 z-30 px-3 pb-2 pt-1"
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl text-white font-bold text-sm shadow-xl pointer-events-none"
           style={{
-            background: "oklch(0.05 0.02 240 / 0.92)",
-            backdropFilter: "blur(10px)",
+            background: "oklch(0.15 0.05 240 / 0.95)",
+            border: "1px solid oklch(0.5 0.2 240 / 0.6)",
+            backdropFilter: "blur(8px)",
           }}
         >
-          {/* Per-device waiting indicator: show when it's not my turn */}
-          {isPerDevice &&
-            !isMyTurn &&
-            !(isAIMode && state.currentPlayerIndex === 1) && (
-              <div
-                className="w-full h-11 rounded-xl flex items-center justify-center gap-2 border"
-                style={{
-                  background: "oklch(0.1 0.02 240 / 0.85)",
-                  borderColor: "oklch(0.3 0.03 240 / 0.4)",
-                  backdropFilter: "blur(8px)",
-                  color: "oklch(0.55 0.04 240)",
-                }}
-              >
-                <span className="animate-pulse text-sm">⏳</span>
-                <span className="text-xs font-semibold">
-                  Turno de {getDisplayName(state.currentPlayerIndex)} —
-                  espera...
-                </span>
-              </div>
-            )}
-          {/* Draw button — only when it's my turn */}
-          {state.currentPhase === "draw" &&
-            (!isPerDevice || isMyTurn) &&
-            !(isAIMode && state.currentPlayerIndex === 1) && (
-              <button
-                type="button"
-                onClick={() => syncDispatch({ type: "DRAW_PHASE" })}
-                className="w-full h-11 rounded-xl font-bold text-sm flex items-center justify-center gap-2"
-                style={{
-                  background: "oklch(0.85 0.22 85 / 0.85)",
-                  color: "oklch(0.08 0.02 240)",
-                  backdropFilter: "blur(8px)",
-                  boxShadow: "0 0 20px oklch(0.85 0.22 85 / 0.4)",
-                }}
-                data-ocid="game.mobile_draw_button"
-              >
-                📡 Robar Carta
-              </button>
-            )}
-          {/* End turn button — only when it's my turn */}
-          {(state.currentPhase === "play" || state.currentPhase === "end") &&
-            (!isPerDevice || isMyTurn) &&
-            !(isAIMode && state.currentPlayerIndex === 1) && (
-              <button
-                type="button"
-                onClick={handleEndTurn}
-                className="w-full h-11 rounded-xl font-bold text-sm flex items-center justify-center gap-2"
-                style={{
-                  background: "oklch(0.75 0.25 145 / 0.85)",
-                  color: "oklch(0.08 0.02 240)",
-                  backdropFilter: "blur(8px)",
-                  boxShadow: "0 0 20px oklch(0.75 0.25 145 / 0.4)",
-                }}
-                data-ocid="game.mobile_end_turn_button"
-              >
-                Fin del Turno →
-              </button>
-            )}
+          {attackerNotification}
         </div>
       )}
+
+      {/* ── Mobile sticky bottom action bar ── */}
+      {!showTurnTransition &&
+        (!state.pendingAttack || (isPerDevice && !isMyDefenseTurn)) && (
+          <div
+            className="sm:hidden fixed bottom-0 left-0 right-0 z-30 px-3 pb-2 pt-1"
+            style={{
+              background: "oklch(0.05 0.02 240 / 0.92)",
+              backdropFilter: "blur(10px)",
+            }}
+          >
+            {/* Per-device waiting indicator: show when it's not my turn */}
+            {isPerDevice &&
+              !isMyTurn &&
+              !(isAIMode && state.currentPlayerIndex === 1) && (
+                <div
+                  className="w-full h-11 rounded-xl flex items-center justify-center gap-2 border"
+                  style={{
+                    background: "oklch(0.1 0.02 240 / 0.85)",
+                    borderColor: "oklch(0.3 0.03 240 / 0.4)",
+                    backdropFilter: "blur(8px)",
+                    color: "oklch(0.55 0.04 240)",
+                  }}
+                >
+                  <span className="animate-pulse text-sm">⏳</span>
+                  <span className="text-xs font-semibold">
+                    Turno de {getDisplayName(state.currentPlayerIndex)} —
+                    espera...
+                  </span>
+                </div>
+              )}
+            {/* Draw button — only when it's my turn */}
+            {state.currentPhase === "draw" &&
+              (!isPerDevice || isMyTurn) &&
+              !(isAIMode && state.currentPlayerIndex === 1) && (
+                <button
+                  type="button"
+                  onClick={() => syncDispatch({ type: "DRAW_PHASE" })}
+                  className="w-full h-11 rounded-xl font-bold text-sm flex items-center justify-center gap-2"
+                  style={{
+                    background: "oklch(0.85 0.22 85 / 0.85)",
+                    color: "oklch(0.08 0.02 240)",
+                    backdropFilter: "blur(8px)",
+                    boxShadow: "0 0 20px oklch(0.85 0.22 85 / 0.4)",
+                  }}
+                  data-ocid="game.mobile_draw_button"
+                >
+                  📡 Robar Carta
+                </button>
+              )}
+            {/* End turn button — only when it's my turn */}
+            {(state.currentPhase === "play" || state.currentPhase === "end") &&
+              (!isPerDevice || isMyTurn) &&
+              !(isAIMode && state.currentPlayerIndex === 1) && (
+                <button
+                  type="button"
+                  onClick={handleEndTurn}
+                  className="w-full h-11 rounded-xl font-bold text-sm flex items-center justify-center gap-2"
+                  style={{
+                    background: "oklch(0.75 0.25 145 / 0.85)",
+                    color: "oklch(0.08 0.02 240)",
+                    backdropFilter: "blur(8px)",
+                    boxShadow: "0 0 20px oklch(0.75 0.25 145 / 0.4)",
+                  }}
+                  data-ocid="game.mobile_end_turn_button"
+                >
+                  Fin del Turno →
+                </button>
+              )}
+          </div>
+        )}
 
       {/* ── Mobile Log button (bottom-right FAB) ── */}
       <button
@@ -2063,6 +2134,11 @@ export default function GameScreen({
           onStartTurn={
             transitionData.isLocalPlayerTurn
               ? handleTurnTransitionStartTurn
+              : undefined
+          }
+          autoStartMs={
+            isMultiplayerSync && isPerDevice && transitionData.isLocalPlayerTurn
+              ? 2000
               : undefined
           }
         />

@@ -42,7 +42,7 @@ interface UseGameSyncOptions {
 }
 
 const CLEAN_DELAY_MS = 12000; // how long action stays in name before cleanup — longer so polling has multiple chances to catch it
-const POLL_INTERVAL_MS = 400; // faster poll to catch actions sooner
+const POLL_INTERVAL_MS = 300; // faster poll to catch actions sooner
 const REJOIN_DELAY_MS = 500; // delay between leave and rejoin to avoid backend race
 
 export function useGameSync({

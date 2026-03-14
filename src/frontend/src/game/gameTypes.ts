@@ -62,6 +62,8 @@ export interface PlayerState {
   monitoreoActive: boolean;
   /** Whether player revealed their hand (Amigo de Confianza) */
   handRevealed: boolean;
+  /** Turns remaining that player cannot play action cards (Spam-Bot) */
+  spammedTurns: number;
 }
 
 export interface GameLogEntry {

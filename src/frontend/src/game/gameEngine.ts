@@ -81,6 +81,7 @@ export function createInitialState(
       firewallAguaActive: false,
       monitoreoActive: false,
       handRevealed: false,
+      spammedTurns: 0,
     };
   });
 
@@ -284,6 +285,8 @@ export function executeEndPhase(state: GameState): GameState {
     // Decrement blockedTurns for every player so Ransomware/Spam don't drag on
     if (p.blockedTurns > 0)
       updates.blockedTurns = Math.max(0, p.blockedTurns - 1);
+    if (p.spammedTurns > 0)
+      updates.spammedTurns = Math.max(0, p.spammedTurns - 1);
     // Clear per-turn effects only for the player who just ended their turn
     if (p.id === currentPlayer.id) {
       updates.firewallAguaActive = false;
@@ -510,12 +513,32 @@ export function resolveAttack(
       break;
     }
 
-    case "malware":
-    case "virus": {
+    case "malware": {
+      const dmg = target.monitoreoActive ? Math.floor(1 / 2) : 1;
       newPlayers = newPlayers.map((p) =>
-        p.id === targetPlayerId ? damagePlayer(p, 1) : p,
+        p.id === targetPlayerId ? damagePlayer(p, dmg) : p,
       );
       logMsg = `💀 ${target.name} pierde 1 Servidor por "${card.name}".`;
+      break;
+    }
+
+    case "virus": {
+      // Force discard all defense cards from target's hand
+      const defenses = target.hand.filter((c) => c.type === "defense");
+      if (defenses.length > 0) {
+        newPlayers = newPlayers.map((p) => {
+          if (p.id === targetPlayerId)
+            return { ...p, hand: p.hand.filter((c) => c.type !== "defense") };
+          return p;
+        });
+        newDiscard = [...newDiscard, ...defenses];
+        logMsg = `🦠 Virus Desconocido destruyó ${defenses.length} carta(s) de Defensa de ${target.name}.`;
+      } else {
+        newPlayers = newPlayers.map((p) =>
+          p.id === targetPlayerId ? damagePlayer(p, 1) : p,
+        );
+        logMsg = `💀 ${target.name} no tenía defensas — pierde 1 Servidor por Virus Desconocido.`;
+      }
       break;
     }
 
@@ -617,7 +640,8 @@ export function resolveAttack(
     }
 
     case "botnet": {
-      const dmg = target.monitoreoActive ? Math.floor(2 / 2) : 2;
+      const rawDmg = card.power ?? 2;
+      const dmg = target.monitoreoActive ? Math.floor(rawDmg / 2) : rawDmg;
       newPlayers = newPlayers.map((p) =>
         p.id === targetPlayerId ? damagePlayer(p, dmg) : p,
       );
@@ -627,7 +651,7 @@ export function resolveAttack(
 
     case "spam": {
       newPlayers = newPlayers.map((p) =>
-        p.id === targetPlayerId ? { ...p, blockedTurns: 1 } : p,
+        p.id === targetPlayerId ? { ...p, spammedTurns: 1 } : p,
       );
       logMsg = `📨 Spam-Bot bloqueó las Acciones de ${target.name} por 1 turno.`;
       break;

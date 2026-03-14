@@ -626,29 +626,65 @@ export default function PlayerZone({
         )}
 
         {faceDown && (
-          <div className="flex gap-1 overflow-x-auto pb-1 items-end min-h-[40px]">
-            {player.hand.length === 0 ? (
-              <p className="text-[9px] text-muted-foreground italic self-center mx-auto">
-                Sin cartas
-              </p>
-            ) : (
-              <div className="flex items-center gap-1 flex-wrap">
-                {player.hand.map((card, idx) => (
-                  <XsCardBack key={card.id} idx={idx} />
-                ))}
-                <span
-                  className="text-[8px] font-bold ml-0.5 px-1 py-0.5 rounded"
-                  style={{
-                    background: "oklch(0.18 0.03 240 / 0.8)",
-                    color: "oklch(0.55 0.05 240)",
-                    border: "1px solid oklch(0.25 0.03 240 / 0.6)",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {player.hand.length} cartas
-                </span>
+          <div className="flex flex-col gap-1">
+            {player.handRevealed && (
+              <div
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold animate-pulse"
+                style={{
+                  background: "oklch(0.25 0.12 25 / 0.7)",
+                  color: "oklch(0.75 0.18 25)",
+                  border: "1px solid oklch(0.55 0.18 25 / 0.8)",
+                  boxShadow: "0 0 8px oklch(0.55 0.18 25 / 0.5)",
+                }}
+              >
+                👁️ MANO REVELADA
               </div>
             )}
+            <div className="flex gap-1 overflow-x-auto pb-1 items-end min-h-[40px]">
+              {player.hand.length === 0 ? (
+                <p className="text-[9px] text-muted-foreground italic self-center mx-auto">
+                  Sin cartas
+                </p>
+              ) : player.handRevealed ? (
+                <div className="flex gap-1 flex-wrap">
+                  {player.hand.map((card, _idx) => (
+                    <div
+                      key={card.id}
+                      className="relative flex-shrink-0"
+                      style={{
+                        boxShadow: "0 0 10px oklch(0.55 0.18 25 / 0.8)",
+                      }}
+                    >
+                      <GameCard
+                        card={card}
+                        isSelected={false}
+                        isPlayable={false}
+                        isFaceDown={false}
+                        size="sm"
+                        onClick={undefined}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex items-center gap-1 flex-wrap">
+                  {player.hand.map((card, _idx) => (
+                    <XsCardBack key={card.id} idx={_idx} />
+                  ))}
+                  <span
+                    className="text-[8px] font-bold ml-0.5 px-1 py-0.5 rounded"
+                    style={{
+                      background: "oklch(0.18 0.03 240 / 0.8)",
+                      color: "oklch(0.55 0.05 240)",
+                      border: "1px solid oklch(0.25 0.03 240 / 0.6)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {player.hand.length} cartas
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
